@@ -9,4 +9,4 @@ data_EIH_TestMod_Site.xlsx includes the behaviroal, physiological, questionnaire
 
 CODE
 
-analysis_EIH_TestMod_Site.R includes the script for data analysis in R version 4.2.3 (https://www.r-project.org/). The subfolder ALGOMETER includeds the custom scripts developped in MATLAB version 2022b for real time visual feedback on algometer data.
+analyses_EIH_TestMod_Site.R includes the script for data analysis in R version 4.2.3 (https://www.r-project.org/). The subfolder ALGOMETER includeds the custom scripts developped in MATLAB version 2022b for real time visual feedback on algometer data.
