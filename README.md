@@ -1,7 +1,7 @@
 # EIH_TestMod_Site
 
 
-Data and Code for the manuscript "Exercise-induced hypoalgesia: effect of test modality and testing site in healthy young males"
+Data and Code for the manuscript: "Exercise-induced hypoalgesia: effect of test modality and testing site in healthy young males"
 
 DATA
 
