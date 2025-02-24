@@ -1,0 +1,3942 @@
+---
+title: "Analyses script: EIH ~ Test modality and site"
+output:
+  html_document:  
+    code_folding: hide 
+    theme: flatly              
+    toc: yes  
+    toc_float: yes
+    toc_depth: 3
+    number_sections: yes                      
+---
+
+# Library calls, set-up, data load
+```{r library, echo=T, warning=F, comment=F, message = F}
+library(lattice) # dot plot for empty lme 
+library(moments) # distribution parameters
+library(superb) # plot annotation
+library(DescTools) # function Sign test for paired non-parametric test
+library(effectsize) # effect sizes computations
+library(grid) # plots organization
+library(gridExtra) # plots organizaton
+library(rstatix) # tidy base r stat
+library(emmeans) # post-hoc tests
+library(ggstatsplot) # plots extra functions
+library(glue) # augmented paste function
+library(tidyverse) # dataset organization tools
+library(ftExtra) # package for tabular presentatino of results
+library(officedown) # package for tabular presentatino of results
+library(officer) # package for tabular presentatino of results
+library(flextable) # package for tabular presentatino of results
+library(rvg) # vectorial export of plots
+library(patchwork) # plots organization
+library(readxl) # import data from excel file
+library(stringr) # function to work with strings
+library(ggpubr) # added plotting functions
+library(lme4) # linear mixed models computations
+library(broom) # tidy model presentation
+library(broom.mixed) # tidy model presentation for lme
+library(ggpp) # added plotting functions
+library(see) # added plotting functions
+library(ggtext) # added plotting functions
+library(ggsci) # added plotting functions
+library(kableExtra) # html table
+library(psych) # descriptive statistics and reliability assessment
+library(here) # path definition
+library(lmerTest) # compute p values for lme
+library(ggplotify) # package allowing conversion of plot to ggplot objects
+
+
+
+
+
+```
+
+```{r set-up}
+options(contrasts = c("contr.sum","contr.poly")) # setting a sum contrast/effect coding for lmer
+
+set_flextable_defaults(font.size = 8,font.family = "Helevetica", padding=2, digits = 3) # display for flextables
+
+knitr::opts_chunk$set( # display for chunks
+  tidy    = TRUE,
+  warning = F,
+  comment = NULL,
+  message = F,
+  results = 'markup'
+  )
+
+
+#fun_names <- dir(here("functions_wp1"))
+
+##for(i in 1:length(fun_names)){
+#  source(here(paste0("functions_wp1/", fun_names[i])))
+#}
+
+
+
+
+
+```
+
+```{r functions}
+# confidence intervals
+ci_low <- function(x){
+  avg <- mean(x, na.rm = T)
+  sd <- sd(x, na.rm = T)
+  n <- length(x)
+  error <- qnorm(0.95) * sd/sqrt(n)
+  avg - error
+}
+
+ci_high <- function(x){
+  avg <- mean(x, na.rm = T)
+  sd <- sd(x, na.rm = T)
+  n <- length(x)
+  error <- qnorm(0.95) * sd/sqrt(n)
+  avg + error
+}
+
+# mean function for reliab calculation
+
+m1 <- function(x,y,z){
+  (x+y+z)/3
+}
+
+m2 <- function(x,y){
+  (x+y)/2
+}
+
+# mean function
+m <- function(x,y,z){
+  (x+y+z)/3
+}
+
+## Parenthesis
+par <- function(x,na.rm=FALSE){paste0("(",x,")")}
+
+# formatting decimals
+specify_decimal <- function(x, k) trimws(format(round(x, k), nsmall=k))
+
+
+# formatting p values
+pvalue_format <- function(x) {
+  z <- cut(x, breaks = c(-Inf, 0.001, 0.01, 0.05, 0.1, Inf), labels = c("***", " **", "  *", "  .", "   "))
+  z <- as.character(z)
+  z[is.na(x)] <- ""
+  z
+}
+
+pvalue_format_table <- function(p){
+  if(p<0.001){
+    return("< .001")
+    }
+  else{
+    (return(format(p, digits = 3)))
+  }
+}
+
+pvalue_format_plot <- function(p){
+  if(p<0.001){
+    return("p < .001")
+  }
+  else{
+    (return(paste("p =",format(p, digits = 3))))
+  }
+}
+
+# ft formatting
+
+dash_border <- officer::fp_border(color = "gray", style = "dashed")
+
+# log t, will return NA if input is NA
+logt <- function(x){
+  
+  if(is.na(x)){
+    return(NA)
+  } else {
+    x <- abs(x) + 0.1
+  } 
+  log <- log10(x)
+  return(log)
+}
+
+
+# function that returns the value at nth position from the max
+# 1 is the max value
+# input : vector, nth position
+# output: value
+tn <- function(x,n){
+  v <- sort(unique(x), decreasing = T)[n]
+  return(v)
+}
+
+
+# function to detect cooks values > 1 in a linear mixed model
+
+cooks_outliers <- function(lmm, d, criteria = 1){
+  cooksd <- cooks.distance(lmm)
+  influential <- as.numeric(names(cooksd)[(cooksd > criteria)])
+  
+  if(is_empty(influential)){
+    cat("No outlier detected")
+    
+  } else {
+    cat(length(influential), "outliers detected. Observation(s) number: ", influential)
+    d.nouout <- d[-influential,]
+    
+    return(d.nouout)
+  }
+    
+}
+
+
+# ggplot custom theme
+my_theme <- function(#base_size = 9, # theming function for ggplot
+                     base_family = 'Roboto',
+                     #base_line_size = base_size/22,
+                     #base_rect_size = base_size/22,
+                     border = TRUE) {
+  theme(axis.line.y = element_line(colour = "grey"), 
+        axis.line.x = element_line(colour = "grey"), 
+        panel.background = element_blank(), 
+        plot.title = element_text(hjust = 0), 
+        plot.subtitle = element_text(hjust = 0),
+        axis.title.y = element_markdown(),
+        plot.margin = unit(c(0, 0.5, 0.5, 0), "cm"))
+}
+
+
+
+var_summary <- function(data, var_vec){
+  # summary of non-grouped data 
+  
+  smry <- data %>%
+    select({{var_vec}}) %>%
+    psych::describe(quant=c(.25,.75), IQR = T) %>%
+    as_tibble(rownames="rowname")  %>%
+    select(var=rowname, mean, sd, min, median, max, IQR) |> 
+    mutate(across(is.numeric,round, 2))
+  return(smry)
+}
+
+
+# Vladimir Aron 22/07/2024
+
+# input: data set, title, units, df anova, var2 = variable to filter anova table with
+# output: an interaction plot with the results of the interaction computed from the anova df using corr/non-corr p value
+
+
+
+plot_prepost_an <- function(d, t, u, df_an,v, y = "test_value", x = T, corr = F){
+
+  
+ # d <- dm.ppt.quad
+  #  t <- "CDT"
+#  u <- "°C"
+#  mod  <- m.0.pptquad
+#  y <- "test_value"
+#  df_an <- an_mpp
+ # v = "CDT_Quadriceps"
+  
+ # d = dm.adt
+ # t = "Auditory detection threshold"
+ # u = "mA"
+ # df_an = an_mpp
+ # v = "ADT_No site"
+  
+ 
+  main <- strsplit(v,  "_")[[1]][1]
+  sub <- strsplit(v,  "_")[[1]][2]
+  
+  
+  d <- d |> 
+    mutate(timing = factor(timing, levels = c("pre", "post"), labels = c("Pre", "Post")),
+           condition = factor(condition, levels = c("cont", "exp"), labels = c("Control", "Exercise")))
+  
+  
+  d.sum <- d |> 
+    group_by(timing, condition, ID) |> 
+    mutate(tm = mean(.data[[y]], na.rm = T)) |> 
+    slice(1) |> 
+    ungroup() |> 
+    group_by(timing, condition) |> 
+    summarise(m = mean(tm, na.rm = T),
+              cil = ci_low(tm),
+              cih = ci_high(tm))
+  
+  d.all <- d |> 
+    group_by(timing, condition, ID) |> 
+    mutate(tm = mean(.data[[y]], na.rm = T)) |> 
+    slice(1) |> 
+    mutate(ID2 = factor(paste(condition, ID))) |> 
+    arrange(ID2)
+  
+  grand.mean <- mean(d.all$tm, na.rm = T)
+  
+  if(corr == T){
+    label <- df_an |> 
+      filter(var2 == v) |> 
+      filter(term == "timing:condition") |>
+      mutate(p.corr = pvalue_format_plot(p.corr)) |> 
+      mutate(interaction = glue("Timing x Condition: {p.corr}")) |> 
+      pull(interaction)
+  } else{
+    label <- df_an |> 
+      filter(var2 == v) |> 
+      filter(term == "timing:condition") |>
+      mutate(p.value = pvalue_format_plot(p.value)) |> 
+      mutate(interaction = glue("Timing x Condition: {p.value}")) |> 
+      pull(interaction)
+  }
+
+  
+  
+  
+  
+  grob <- grobTree(textGrob(label, x = 0.1, y = 0.95, hjust=0,
+                            gp=gpar(col="black", fontsize=9, fontfamily = "Roboto")))
+  
+  grob2 <- grobTree(textGrob(label, x = 0.1, y = 0.95, hjust=0,
+                            gp=gpar(col="black", fontsize=9, fontfamily = "Roboto")))
+  
+  
+  
+  
+  
+  
+  pos <- position_dodge2(width = 0.1)
+  pos2 <- position_dodgenudge(width = 0.3)
+  # pos <- position_dodgenudge(width = 0.3)
+  pos3 <- position_dodge2(width = 0.2)
+  
+  p_full <- d.sum |> 
+    ggplot(aes(x = timing, y = m, col = condition)) +
+    geom_point(position = pos2, size = 3) +
+    geom_line(aes(group = factor(condition)), position = pos2, linewidth = 1) +
+    geom_errorbar(aes(ymin =cil, ymax = cih), width = 0.1, position = pos2) +
+    geom_point(data = d.all, aes(y = tm, x = timing, col = condition) ,alpha = 0.2, size = 1, position = pos) +
+    geom_line(data = d.all, aes(y = tm, x = timing, col =   condition, group = ID2) ,alpha = 0.05,  position = pos) + 
+    scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+    my_theme() +
+    labs(title = t,
+         x = "Timing",
+         col = "Condition",
+         y = u) + annotation_custom(grob)
+  
+ if(main == "ADT"){
+   coord_y_lim = c(quantile(d.all$tm, 0.1, na.rm = T), quantile(d.all$tm, 0.99, na.rm = T))
+ } else {
+   coord_y_lim = c(quantile(d.all$tm, 0.2), quantile(d.all$tm, 0.8))
+   }
+  
+  p_means <- d.sum |> 
+    ggplot(aes(x = timing, y = m, col = condition)) +
+    geom_point(position = pos2, size = 4, show.legend = F) +
+    geom_line(aes(group = factor(condition)), position = pos2, linewidth = 1, show.legend = F) +
+    geom_errorbar(aes(ymin =cil, ymax = cih), width = 0.05, position = pos2, show.legend = F) +
+    scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(aes(linetype = "Overall mean", yintercept = grand.mean),  color = "lightgrey") + 
+    scale_linetype_manual(values = c("Overall mean" = "dashed")) +
+    coord_cartesian(ylim = coord_y_lim)  +
+    my_theme() +
+    labs(
+         x = "Timing",
+         col = "Condition",
+         linetype = "",
+         y = paste("Condition means (", u, ")")) + annotation_custom(grob2)+
+    theme(legend.position = "top")
+  
+  
+  p_points <-  ggplot()+
+    geom_point(data = d.all, aes(y = tm, x = timing, col = condition) , position = pos3, alpha = 0.7, size = 2, show.legend = F) +
+    geom_line(data = d.all, aes(y = tm, x = timing, col =   condition, group = ID2) ,alpha = 0.2,  position = pos3, linewidth = 0.5, show.legend = F) + 
+    scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+    my_theme() +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    theme(legend.position = "none") +
+    geom_hline(aes(linetype = "Overall mean", yintercept = grand.mean), color = "lightgrey", show.legend = F) + 
+    scale_linetype_manual(values = c("Overall mean" = "dashed")) +
+    labs(title = t,
+         subtitle = sub,
+         x = "Timing", 
+         linetype = "",
+         y = paste("Individual means (", u, ")")) + 
+    theme(legend.position = "none")
+  
+  
+  
+  grob_cont <- grobTree(textGrob("Control", x = 0.05, y = 0.95, hjust=0,
+                                 gp=gpar(col="#00468BFF", fontsize=9, fontfamily = "Roboto")))
+  
+  grob_exp <- grobTree(textGrob("Exercise", x = 0.05, y = 0.95, hjust=0,
+                                gp=gpar(col="#ED0000FF", fontsize=9, fontfamily = "Roboto")))
+  
+  pos4 <- position_dodge2(width = 0.1)
+  p_points_cont <- d.all |> 
+    filter(condition == "Control") |>
+    ggplot()+
+    geom_point(aes(y = tm, x = timing, col = condition) , position = pos4, alpha = 0.7, size = 2,  show.legend = F) +
+    geom_line(aes(y = tm, x = timing, col =   condition, group = ID2) ,alpha = 0.2, linewidth = 0.5,  position = pos4, show.legend = F) + 
+    scale_color_manual(values = "#00468BFF") +
+    my_theme() +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(aes(linetype = "Overall mean", yintercept = grand.mean), color = "lightgrey", show.legend = F) +
+    scale_linetype_manual(values = c("Overall mean" = "dashed")) +
+    labs(title = t,
+         subtitle = sub,
+         x = "Timing",
+         y = paste("Individual means (", u, ")") )  +
+    theme(
+      legend.position = "none"
+    ) + annotation_custom(grob_cont)
+  
+  p_points_exp <- d.all |> 
+    filter(condition == "Exercise") |>
+    ggplot()+
+    geom_point(aes(y = tm, x = timing, col = condition) , position = pos4, alpha = 0.7, size = 2,  show.legend = F) +
+    geom_line(aes(y = tm, x = timing, col =   condition, group = ID2) ,alpha = 0.2, linewidth = 0.5,  position = pos4, show.legend = F) + 
+    scale_color_manual(values = "#ED0000FF") +
+    my_theme() +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(aes(linetype = "Overall mean", yintercept = grand.mean), color = "lightgrey", show.legend = F) +
+    scale_linetype_manual(values = c("Overall mean" = "dashed")) +
+    labs(title = "",
+         subtitle = "",
+         x = "Timing",
+         y ="" ) + annotation_custom(grob_exp)
+  
+  
+  
+  
+  if(x == F){
+    
+    p_points_cont <- p_points_cont +  theme(axis.text.x=element_blank(),
+                                            axis.ticks.x=element_blank(),
+                                            axis.line.x = element_blank()) +
+      labs(x = "")
+    
+    p_points_exp <- p_points_exp +  theme(axis.text.x=element_blank(),
+                                          axis.ticks.x=element_blank(),
+                                          axis.line.x = element_blank()) +
+      labs(x = "")
+    
+    
+    p_points <- p_points + 
+      scale_x_discrete(breaks = "") +
+      labs(x = "")
+    
+    p_means <- p_means + 
+      scale_x_discrete(breaks = "") +
+      labs(x = "")
+  } 
+ 
+#  p <-  p_points + p_means 
+  
+  p <-  (p_points_cont + p_points_exp + p_means)
+
+  
+  #annotate("text", x = 1.2, y = max(d.all$tm), label = label)
+  
+  if(y == "test_value"){
+    return(p)
+  } else {
+    return(p_full)
+  }
+  
+  
+}
+
+
+# Vladimir Aron 22/07/2024
+# input: data set, title, units, lmm model
+# output : interaction plot site:condition + annotation of the significance of the interaction
+
+ 
+
+plot_eih_s <- function(d,t, u, mod, y_axis = T, x = F){
+  
+   #d <- dm.ppt
+  # mod <- m.0.ppt
+  # t <- "d"
+ #  u <- "d"
+  
+
+  
+  label <- anova(mod, ddf = "Kenward-Roger") |>
+    tidy() |> 
+    filter(term == "condition:site") |>
+    mutate(p = pvalue_format_plot(p.value)) |> 
+    mutate(interaction = glue("Site x Condition: {p}")) |> 
+    pull(interaction)
+  
+  grob <- grobTree(textGrob(label, x = 0.05, y = 0.95, hjust=0,
+                            gp=gpar(col="black", fontsize=9, fontfamily = "Roboto")))
+  
+  grob_cont <- grobTree(textGrob("Control", x = 0.05, y = 0.95, hjust=0,
+                            gp=gpar(col="#00468BFF", fontsize=9, fontfamily = "Roboto")))
+  
+  grob_exp <- grobTree(textGrob("Exercise", x = 0.05, y = 0.95, hjust=0,
+                                 gp=gpar(col="#ED0000FF", fontsize=9, fontfamily = "Roboto")))
+  
+  dd <- d |> 
+    mutate(site = factor(site, levels = c("forearm", "quad"), labels = c("Forearm", "Quadriceps")),
+           condition = factor(condition, levels = c("cont", "exp"), labels = c("Control", "Exercise")))
+  
+  
+  d.sum <- dd |> 
+    group_by(site, condition, ID) |> 
+    mutate(tm = mean(abc, na.rm = T)) |> 
+    slice(1) |> 
+    ungroup() |> 
+    group_by(site, condition) |> 
+    summarise(m = mean(tm),
+              cil = ci_low(tm),
+              cih = ci_high(tm))
+  
+  d.all <- dd |> 
+    group_by(site, condition, ID) |> 
+    mutate(tm = mean(abc, na.rm = T)) |> 
+    slice(1) |> 
+    mutate(ID2 = factor(paste(ID, condition))) |> 
+    arrange(ID2)
+  grand.mean <- mean(d.all$tm, na.rm = T)
+  coord_y_lim = c(quantile(d.all$tm, 0.1), quantile(d.all$tm, 0.9))
+  
+  pos <- position_dodge2(width = 0.1)
+  pos2 <- position_dodgenudge(width = 0.3)
+  
+  p.all <- d.sum |> 
+    ggplot(aes(x = site, y = m, col = condition, group = condition)) +
+    geom_point(position = pos2, size = 4) +
+    geom_line(position = pos2, linewidth = 1) +
+    geom_errorbar(aes(ymin =cil, ymax = cih), width = 0.1, position = pos2) +
+    geom_point(data = d.all, aes(y = tm, x = site, col = condition) ,alpha = 0.2, size = 1, position = pos) +
+    geom_line(data = d.all, aes(y = tm, x = site, col =   condition, group = ID2) ,alpha = 0.05,  position = pos) + 
+    scale_color_manual(values = c("#ED0000FF","#00468BFF")) +
+    geom_hline(yintercept = 0, col = "grey", alpha = 0.5, linetype = "dashed") +
+    my_theme() +
+    labs(title = t,
+         x = "Site",
+         col = "Condition",
+         y = u) +
+    theme(legend.position = "top")+ annotation_custom(grob)
+  
+  if(y_axis == T){
+   # y_title_points <-  paste("Diff<sub>post-pre</sub> (", u, ")")
+   # y_title_means <- paste("Diff<sub>post-pre</sub> (", u, ")")
+    y_title_points <-  y_title_means <- "Diff<sub>post-pre</sub> (standardized units)"
+    
+  }else{
+    y_title_points <-  y_title_means <- ""
+  }
+  
+  
+  
+  pos3 <- position_dodge2(width = 0.2)
+  p_points <- ggplot()+
+    geom_point(data = d.all, aes(y = tm, x = site, col = condition) , position = pos3, alpha = 0.7, size = 2,  show.legend = F) +
+    geom_line(data = d.all, aes(y = tm, x = site, col =   condition, group = ID2) ,alpha = 0.2, linewidth = 0.5,  position = pos3, show.legend = F) + 
+    scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+    my_theme() +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(yintercept = 0, col = "grey", alpha = 0.5, linetype = "dashed") +
+    labs(title = t,
+         subtitle = "Individual means",
+         x = "Site",
+         y = y_title_points )  +
+    theme(
+      legend.position = "none"
+    ) 
+  pos4 <- position_dodge2(width = 0.1)
+  p_points_cont <- d.all |> 
+    filter(condition == "Control") |>
+    ggplot()+
+    geom_point(aes(y = tm, x = site, col = condition) , position = pos4, alpha = 0.7, size = 2,  show.legend = F) +
+    geom_line(aes(y = tm, x = site, col =   condition, group = ID2) ,alpha = 0.2, linewidth = 0.5,  position = pos4, show.legend = F) + 
+    scale_color_manual(values = "#00468BFF") +
+    my_theme() +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(yintercept = 0, col = "black", linetype = "dashed") +
+    labs(title = t,
+         subtitle = "Individual means",
+         x = "Site",
+         y = y_title_points )  +
+    theme(
+      legend.position = "none"
+    ) + annotation_custom(grob_cont)
+  
+  p_points_exp <- d.all |> 
+    filter(condition == "Exercise") |>
+    ggplot()+
+    geom_point(aes(y = tm, x = site, col = condition) , position = pos4, alpha = 0.7, size = 2,  show.legend = F) +
+    geom_line(aes(y = tm, x = site, col =   condition, group = ID2) ,alpha = 0.2, linewidth = 0.5,  position = pos4, show.legend = F) + 
+    scale_color_manual(values = "#ED0000FF") +
+    my_theme() +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(yintercept = 0, col = "black",  linetype = "dashed") +
+    labs(title = "",
+         subtitle = "",
+         x = "Site",
+         y ="" )  +
+    theme(
+      legend.position = "none"
+    ) + annotation_custom(grob_exp)
+  
+  
+  
+  
+  p_means <- d.sum |> 
+    ggplot(aes(x = site, y = m, col = condition)) +
+    geom_point(position = pos2, size = 4) +
+    geom_line(aes(group = factor(condition)), position = pos2, linewidth = 1) +
+    geom_errorbar(aes(ymin =cil, ymax = cih), width = 0.05, position = pos2) +
+    scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+    scale_y_continuous(limits = c(min(d.all$tm), max(d.all$tm))) +
+    geom_hline(yintercept = 0, col = "black",  linetype = "dashed") +
+    coord_cartesian(ylim = coord_y_lim)  +
+    my_theme() +
+    labs(
+      subtitle = "Condition means",
+      col = "Condition",
+      x = "Site",
+      y = y_title_means) + 
+    annotation_custom(grob)
+  
+  
+  if(x == F){
+    p_points_cont <- p_points_cont +  theme(axis.text.x=element_blank(),
+                                             axis.ticks.x=element_blank(),
+                                             axis.line.x = element_blank()) +
+      labs(x = "")
+    
+    p_points_exp <- p_points_exp +  theme(axis.text.x=element_blank(),
+                                             axis.ticks.x=element_blank(),
+                                             axis.line.x = element_blank()) +
+      labs(x = "")
+    
+    
+    p_points <- p_points + theme(axis.text.x=element_blank(),
+                                 axis.ticks.x=element_blank(),
+                                 axis.line.x = element_blank()) +
+      labs(x = "")
+    
+    p_means <- p_means + theme(axis.text.x=element_blank(),
+                               axis.ticks.x=element_blank(),
+                               axis.line.x = element_blank()) + 
+      labs(x = "")
+  } else{
+    p_points <- p_points
+    p_means <- p_means
+  }
+  
+  
+  p_points_sep <- p_points_cont + p_points_exp
+  
+  
+  res <- list(
+    p.all = p.all,
+    p_ponts_sep = p_points_sep, 
+    p_means = p_means,
+    p_points = p_points
+  )
+  
+  #p <- p + 
+  # annotate("text", x = 1, y = max(d.all$tm), label = label)
+  
+  return(res)
+}
+
+
+```
+
+```{r data}
+
+# data 
+n <- 40 # enter number of desired participants to analyse
+excluded <- c("35", "40")
+n_an <- n - length(excluded)
+
+# data screening session
+## Data baseline
+data_b <- read_excel(here("crf_eih.xlsx"), na = c("NM","missing"), sheet = "baseline", skip = 1, col_names = TRUE) %>% select(!dominance)
+data_b <- data_b[1:n,]
+
+## data test session
+data_t <- read_excel(here("crf_eih.xlsx"), na = c("NM","missing"), sheet = "test_data", skip = 0, col_names = TRUE) 
+data_t <- data_t[1:n,]
+
+## merging data sets
+data_bt <- full_join(data_b, data_t)
+
+# data sessions
+data_1 <- read_excel(here("crf_eih.xlsx"), na = c("NM","missing"), sheet = "session_1", skip = 2, col_names = TRUE)  # import data from session 1
+data_1 <- data_1[1:n,]
+
+data_2 <- read_excel(here("crf_eih.xlsx"), na = c("NM","missing"), sheet = "session_2", skip = 2, col_names = TRUE)  # import data from session 2
+data_2 <- data_2[1:n,]
+
+data_eih <- rbind(data_1, data_2) # combine data from session 1 and 2 
+# merging all data sets
+data_tot <- full_join(data_eih, data_bt)
+
+data <- data_tot  %>% 
+  filter(!ID %in% excluded) |> 
+  mutate(IPAQ_category = factor(IPAQ_category, levels = c("LOW", "MODERATE", "HIGH"))) |> 
+  rename(c("SSS" = "ESS", "RPE" = "rpe_post"))
+  
+
+# removing values ADT post for subject 10  --> technical issue (script ran but somehow reloading it reduced the values to more "normal" levels )
+data["adt_post_1"][data["adt_post_1"] == 0.46] <- "NA"
+data["adt_post_2"][data["adt_post_2"] == 0.41] <- "NA"
+data["adt_post_3"][data["adt_post_3"] == 0.43] <- "NA"
+
+#data |> 
+ # filter(condition == "exp") |> 
+ #select(ID, temp_forearm_post1_nd , temp_forearm_post2_nd) |> view()
+#save(data, "data_testmod_site_20240814")
+
+```
+
+```{r data_long}
+# data sets are put in long format
+
+d_tms_long <- data %>% # data of test mod for each site, condition, order and timing put in long format
+    mutate(across(starts_with("ppt_"),as.numeric)) %>%
+    mutate(across(starts_with("cdt_"),as.numeric)) %>%
+    mutate(across(starts_with("hpt_"),as.numeric)) %>%
+    mutate(across(starts_with("pp_"),as.numeric)) %>%
+    mutate(across(starts_with("adt_"),as.numeric)) %>%
+    rename_with(~sub("adt_", "adt_nosite_", .), everything()) %>%
+  select(ID, condition, session, starts_with(c("ppt_", "cdt_", "hpt_", "pp_", "adt_"))) |> 
+    pivot_longer(cols = starts_with(c("ppt_", "cdt_", "hpt_", "pp_", "adt_")),
+                 names_to = c("test_mod","site", "timing", "order"),
+                 names_pattern = "(^\\w+)_(\\w+)_(\\w+)_(\\w+)",
+                 values_to = c("test_value")
+    ) 
+
+reference_date <- as.POSIXct("1970-01-01 00:00:00", tz = "UTC")
+
+d_cov_long <- data %>% # data set of covariables (blood pressure, heart rate...) is put in long format
+    mutate(across(starts_with(c("temp_q", "temp_f")),as.numeric)) %>%
+    mutate(across(starts_with("hr_"),as.numeric)) %>%
+    mutate(across(starts_with("br_"),as.numeric)) %>%
+    rowwise() |> 
+    # bp
+    separate(BP_rest, c("sbp_pre", "dbp_pre"), sep = "/") %>% 
+    separate(bp_post, c("sbp_post", "dbp_post"), sep = "/") %>%
+    mutate(across(c(starts_with("sbp_") , starts_with("dbp_")), as.numeric)) |> 
+    mutate(slope_bp_sys = sbp_post - sbp_pre,
+           slope_bp_diast = dbp_post - dbp_pre) %>% # absolute change of blood pressure
+  select(ID,  condition,HR_rest, BR_rest, duration_pre, hr_post, sbp_post, dbp_post, br_post, duration_post, sbp_pre, dbp_pre) |> 
+    rename(c(hr_pre = HR_rest, br_pre = BR_rest)) |> 
+    group_by(ID, condition) |> 
+    slice(1) |> 
+    mutate(duration_pre = str_replace(duration_pre, ";", ":"),
+           duration_post = str_replace(duration_post, ";", ":")) %>%
+    mutate(duration_pre = strptime(duration_pre, "%M:%S"),
+           duration_post = strptime(duration_post, "%M:%S")) %>%
+    mutate(duration_pre = seconds_to_period(duration_pre),
+           duration_post = seconds_to_period(duration_post)) %>%
+    mutate(duration_pre = period_to_seconds(duration_pre), 
+           duration_post = period_to_seconds(duration_post)) |> 
+    pivot_longer(cols = c(everything(), -ID,-condition ), names_to = c("var","timing"),names_sep = "_", values_to = "values" ) |> 
+    pivot_wider(names_from = var, values_from = values) |> 
+    mutate(duration = as.numeric(seconds_to_period(duration)) + reference_date) |> 
+    mutate(duration =  minute(duration) + second(duration)/60) 
+
+d_mean_temp_long <- data |> # skin temperature data are averaged before and after conditions and put in long format
+    select(ID,condition,  starts_with("temp")) |> 
+    select(-temp_room) |> 
+    mutate(across(starts_with("temp"), as.numeric)) |> 
+    rowwise() |> 
+    mutate(temp_quad_pre = (temp_quad_pre1_d + temp_quad_pre2_d)/2,
+           temp_forearm_pre = (temp_forearm_pre1_nd + temp_forearm_pre2_nd)/2,
+           temp_quad_post = (temp_quad_post1_d + temp_quad_post2_d)/2,
+           temp_forearm_post = (temp_forearm_post1_nd + temp_forearm_post2_nd)/2,
+    ) |> 
+    select(ID, condition, temp_quad_pre, temp_forearm_pre, temp_quad_post, temp_forearm_post) |> 
+    group_by(ID)  |> 
+    pivot_longer(cols = starts_with("temp"),
+                 names_to = c("xx", "site", "timing"),
+                 names_sep = "_",
+                 values_to = "temp") |>
+    select(-xx) 
+
+
+data_long <- full_join(d_tms_long, d_mean_temp_long) |> # data set for skin temperature and tms are merged
+  mutate(site = if_else(test_mod == "adt", "no site", site)) |> 
+  mutate(session = factor(session, levels = c("session_1", "session_2")),
+         timing = factor(timing, levels = c("pre", "post")),
+         order = factor(order, levels = c("1", "2", "3")),
+         test_mod = factor(test_mod, levels = c("ppt", "pp", "hpt", "cdt", "adt")),
+         site = factor(site, levels = c("forearm", "quad", "no site")),
+         condition = factor(condition, levels = c("exp", "cont"))
+         ) |> 
+  mutate(test_value = if_else(test_mod == "cdt",abs(test_value - 32), test_value)) |>  # conversion of CDT in absolute difference from baseline 
+    mutate(test_value = if_else(test_mod == "pp", 105 - test_value, test_value)) |> # reversing scale of PP
+  mutate(test_value = if_else(test_mod == "pp",(test_value/105)*100 ,test_value ))|> # data were collected on a 105mm scale > they are converted to a 100mm scale
+  mutate(test_value = if_else(test_mod == "ppt", test_value*10, test_value)) # converting N/cm2 in kilospascale
+
+
+
+check_mod <-function(lmm,data){
+  
+  
+  
+  mod_name <- deparse(substitute(lmm))
+  data_name <- deparse(substitute(data))
+  mod.info <- paste(mod_name, data_name, sep = ", ")
+  data[,"predicted"] <- predict(lmm)
+  data[,"resid"] <- residuals(lmm)
+  
+  #fitted residuals
+  pfit <- ggplot(data = {{data}}, aes(x = predicted, y = resid)) +
+    geom_point() +
+    geom_hline(yintercept = 0, colour = "red") +
+    facet_wrap(site~test_mod , scales = "free") +
+    labs(title = paste("Fitted values ~ Residuals; ", mod.info))  + my_theme()
+  
+  
+  #plot(fitted(lmm),residuals(lmm), main = paste("Fitted values ~ Residuals; ", mod.info))
+  
+  #normalité epsilon
+  
+  pqq <- ggplot(data = data, aes(sample = resid)) +
+    stat_qq() +
+    stat_qq_line(color = "red") +
+    facet_wrap(site~test_mod, scales = "free") +
+    labs(title = paste("Normality residuals; ", mod.info)) + my_theme()
+  
+  phist <- ggplot(data = data, aes(x = resid)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 9) +
+    geom_density(color = "red") +
+    facet_wrap(site~test_mod, scales = "free") + my_theme() +
+    labs(title = paste("Normality residuals; ", mod.info))
+  
+  
+  # qqnorm(residuals(lmm), main = paste("Normality residuals; ", mod.info) )
+  #qqline(residuals(lmm))
+  
+  # qqplot normalite u_0j
+  raneff  <- names(ranef(lmm))
+  
+  if (length(raneff) > 1){
+    
+    cat("There are more than one random effets: ", paste(raneff, collapse = ", "), "\n")
+    
+    ran_name <- readline(prompt = "Enter name of desired random effet: ")
+    ran_num <- which(raneff == ran_name)
+    str(ranef(lmm))
+    ranef(lmm)[[ran_num]][,1]
+    
+    
+    df <- data.frame(ran = ranef(lmm))
+    
+    qqnorm(ranef(lmm)[[ran_num]][,1], main = paste("Normality random effects: ", ran_name, ", ", mod.info))
+    qqline(ranef(lmm)[[ran_num]][,1], main = paste("Normality random effects: ", ran_name, ", ", mod.info))
+    
+  } else {
+    qqnorm(ranef(lmm)$ID[,1], main = paste("Normality random effects; ", mod.info))
+    qqline(ranef(lmm)$ID[,1])
+  }
+  
+  pcook <-  ggplot(data.frame(cook=cooks.distance(lmm),id=data$ID),
+                   aes(x=cook,y=id)) +
+    geom_point() +
+    labs(title = paste("ID ~ Cook's distance; ", mod.info)) +
+    theme_bw()
+  #(pfit + pcook)/(pqq + phist)
+  
+  print(pfit)
+  print(pcook)
+  print(pqq)
+  print(phist)
+  
+}
+
+
+
+
+check_mod_tms <-function(lmm,data){
+  
+  
+  
+  mod_name <- deparse(substitute(lmm))
+  data_name <- deparse(substitute(data))
+  mod.info <- paste(mod_name, data_name, sep = ", ")
+  data[,"predicted"] <- predict(lmm)
+  data[,"resid"] <- residuals(lmm)
+  
+  #fitted residuals
+  pfit <- ggplot(data = {{data}}, aes(x = predicted, y = resid)) +
+    geom_point() +
+    geom_hline(yintercept = 0, colour = "red") +
+    facet_wrap(timing~condition , scales = "free") +
+    labs(title = paste("Fitted values ~ Residuals; ", mod.info))  + my_theme()
+  
+  
+  #plot(fitted(lmm),residuals(lmm), main = paste("Fitted values ~ Residuals; ", mod.info))
+  
+  #normalité epsilon
+  
+  pqq <- ggplot(data = data, aes(sample = resid)) +
+    stat_qq() +
+    stat_qq_line(color = "red") +
+    facet_wrap(timing~condition, scales = "free") +
+    labs(title = paste("Normality residuals; ", mod.info)) + my_theme()
+  
+  phist <- ggplot(data = data, aes(x = resid)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 9) +
+    geom_density(color = "red") +
+    facet_wrap(timing~condition, scales = "free") + my_theme() +
+    labs(title = paste("Normality residuals; ", mod.info))
+  
+  
+  # qqnorm(residuals(lmm), main = paste("Normality residuals; ", mod.info) )
+  #qqline(residuals(lmm))
+  
+  # qqplot normalite u_0j
+  raneff  <- names(ranef(lmm))
+  
+  if (length(raneff) > 1){
+    
+    cat("There are more than one random effets: ", paste(raneff, collapse = ", "), "\n")
+    
+    ran_name <- readline(prompt = "Enter name of desired random effet: ")
+    ran_num <- which(raneff == ran_name)
+    str(ranef(lmm))
+    ranef(lmm)[[ran_num]][,1]
+    
+    
+    df <- data.frame(ran = ranef(lmm))
+    
+    qqnorm(ranef(lmm)[[ran_num]][,1], main = paste("Normality random effects: ", ran_name, ", ", mod.info))
+    qqline(ranef(lmm)[[ran_num]][,1], main = paste("Normality random effects: ", ran_name, ", ", mod.info))
+    
+  } else {
+    qqnorm(ranef(lmm)$ID[,1], main = paste("Normality random effects; ", mod.info))
+    qqline(ranef(lmm)$ID[,1])
+  }
+  
+  pcook <-  ggplot(data.frame(cook=cooks.distance(lmm),id=data$ID),
+                   aes(x=cook,y=id)) +
+    geom_point() +
+    labs(title = paste("ID ~ Cook's distance; ", mod.info)) +
+    theme_bw()
+  #(pfit + pcook)/(pqq + phist)
+  
+  print(pfit)
+  print(pcook)
+  print(pqq)
+  print(phist)
+  
+}
+
+
+
+check_mod_s <-function(lmm,data){
+  
+  
+  
+  mod_name <- deparse(substitute(lmm))
+  data_name <- deparse(substitute(data))
+  mod.info <- paste(mod_name, data_name, sep = ", ")
+  data[,"predicted"] <- predict(lmm)
+  data[,"resid"] <- residuals(lmm)
+  
+  #fitted residuals
+  pfit <- ggplot(data = {{data}}, aes(x = predicted, y = resid)) +
+    geom_point() +
+    geom_hline(yintercept = 0, colour = "red") +
+    facet_wrap(site~condition , scales = "free") +
+    labs(title = paste("Fitted values ~ Residuals; ", mod.info))  + my_theme()
+  
+  
+  #plot(fitted(lmm),residuals(lmm), main = paste("Fitted values ~ Residuals; ", mod.info))
+  
+  #normalité epsilon
+  
+  pqq <- ggplot(data = data, aes(sample = resid)) +
+    stat_qq() +
+    stat_qq_line(color = "red") +
+    facet_wrap(site~condition, scales = "free") +
+    labs(title = paste("Normality residuals; ", mod.info)) + my_theme()
+  
+  phist <- ggplot(data = data, aes(x = resid)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 9) +
+    geom_density(color = "red") +
+    facet_wrap(site~condition, scales = "free") + my_theme() +
+    labs(title = paste("Normality residuals; ", mod.info))
+  
+  
+  # qqnorm(residuals(lmm), main = paste("Normality residuals; ", mod.info) )
+  #qqline(residuals(lmm))
+  
+  # qqplot normalite u_0j
+  raneff  <- names(ranef(lmm))
+  
+  if (length(raneff) > 1){
+    
+    cat("There are more than one random effets: ", paste(raneff, collapse = ", "), "\n")
+    
+    ran_name <- readline(prompt = "Enter name of desired random effet: ")
+    ran_num <- which(raneff == ran_name)
+    str(ranef(lmm))
+    ranef(lmm)[[ran_num]][,1]
+    
+    
+    df <- data.frame(ran = ranef(lmm))
+    
+    qqnorm(ranef(lmm)[[ran_num]][,1], main = paste("Normality random effects: ", ran_name, ", ", mod.info))
+    qqline(ranef(lmm)[[ran_num]][,1], main = paste("Normality random effects: ", ran_name, ", ", mod.info))
+    
+  } else {
+    qqnorm(ranef(lmm)$ID[,1], main = paste("Normality random effects; ", mod.info))
+    qqline(ranef(lmm)$ID[,1])
+  }
+  
+  pcook <-  ggplot(data.frame(cook=cooks.distance(lmm),id=data$ID),
+                   aes(x=cook,y=id)) +
+    geom_point() +
+    labs(title = paste("ID ~ Cook's distance; ", mod.info)) +
+    theme_bw()
+  #(pfit + pcook)/(pqq + phist)
+  
+  print(pfit)
+  print(pcook)
+  print(pqq)
+  print(phist)
+  
+}
+
+
+
+
+
+```
+
+
+# Participants data
+
+Summary statistics of participants data (age, bmi, laterality, and level of education) as well as scores to questionnaires are computed and formatted in a table.
+
+```{r ts1}
+
+
+
+var_new_names <- c("age" = "Age (years)" ,"bmi" = "BMI (kg/m^2^)" ,"FlANDERS_lat"= "FLANDERS (n)" , "level_education" = "Level of education (n)" , "W_peak_rel" = "Relative PPO (W/kg)", "HR_max" = "Maximal HR (bpm)" , "STAI_2"= "STAI-Y2 (/80)" , "PCS" = "PCS total (/51)" , "FPQ" = "FPQ-15 (/100)" , "IPAQ_category" = "IPAQ category (n)", "IPAQ_total_moderate"= "IPAQ total mPA (MET/min/wk)" , "IPAQ_total_vigourous" = "IPAQ total vPA (MET/min/wk)" , "IPAQ_total_pa"= "IPAQ total PA (MET/min/wk)", "W_peak" = "PPO (W)", "TSK" = "TSK (/37)" )
+
+
+cont_data <- var_summary(data, var_vec = c(age, bmi, W_peak, W_peak_rel, HR_max, STAI_2, PCS, FPQ, TSK, IPAQ_total_moderate, IPAQ_total_vigourous, IPAQ_total_pa)) |> 
+  mutate(value_1 = glue("{mean} ± {sd}")) |> 
+  mutate(value_2 = glue("{median} ({IQR})")) |> 
+  mutate(value = if_else(var %in% c("IPAQ_total_moderate", "IPAQ_total_vigourous", "IPAQ_total_pa"), value_2, value_1)) |> 
+  select(var, value) 
+
+cont_data$levels <- c(rep(NA, nrow(cont_data)))
+
+
+ipaq_cat <- as_tibble(table(subset(data, condition == "exp", IPAQ_category))) |> 
+  rename(levels = IPAQ_category) |>  
+  rename(value = n) 
+ipaq_cat$var <- c(rep("IPAQ_category",nrow(ipaq_cat)))
+
+flanders <- as_tibble(table(subset(data, condition == "exp", FlANDERS_lat))) |> 
+  rename(levels = FlANDERS_lat) |>  
+  rename(value = n) 
+flanders$var <- c(rep("FlANDERS_lat",nrow(flanders)))
+
+educ <- as_tibble(table(subset(data, condition == "exp", level_education))) |> 
+  rename(levels = level_education) |>  
+  rename(value = n) 
+
+educ$var <- c(rep("level_education",nrow(educ)))
+
+order_rows <- c("age", "bmi", "FLANDERS_lat", "level_education", "W_peak", "W_peak_rel", "HR_max", "STAI_2", "PCS", "FPQ", "TSK", "IPAQ_total_moderate", "IPAQ_total_vigourous", "IPAQ_total_pa", "IPAQ_category")
+
+
+t1 <- rbind(cont_data, flanders, ipaq_cat) |> 
+  select(var, levels, value) |> 
+  arrange(factor(var, levels = order_rows)) |> 
+  mutate(var = str_replace_all(var, var_new_names)) |> 
+  flextable() %>%
+  set_header_labels(var = "Variables",levels = " ", value = paste("n =", n_an)) %>%
+  bold(part ="header") %>%
+  merge_v(j = 1, part = "body") |> 
+  autofit() %>%
+  fix_border_issues() %>%
+  colformat_md(part = "body", j = 1) |> 
+    hline(i = c(1:12,15), border = dash_border)  |> 
+  add_footer_lines(values = c("Data presented as mean ± SD; except for as median (interquartile range). \n Abbreviations: BMI, Body mass Index; PPO, Peak power output; HR, Heart rate; STAI-Y2, State-trait anxiety inventory (form 2, trait); PCS, Pain catastrophizing scale; FPQ-15; Fear of pain questionnaire 15 items; TSK, Tampa scale for kinesiophobia; IPAQ, International physical activity questionnaire; FLANDERS, Flinders handedness survey. "
+  )) %>% 
+  #align(i = 1, align = "left", part = "footer") %>%
+  valign(part = "body", valign = "top") |> 
+  set_table_properties(layout = "autofit") 
+
+#print(ts1, preview = "docx")
+t1
+save_as_docx(t1,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/particpants_data.docx")
+
+
+```
+
+
+# Manipulation check
+
+
+## Control vs Exercise condition
+
+Control vs Exercise conditions are compared, before and after intervention, on heart rate (HR), breathing rate (BR), and blood pressure (systolic, SBP; diastolic, DBP) . Scores of rate of perceived exertion (RPE), stanford sleepiness scale (SSS), state anxiety (STAI-Y1) and room temperature and humidity are also compared. 
+
+
+```{r}
+# function that returns a data set for a covariable
+# data is groupd by ID, timing, condition
+
+#input, var
+# output, data set
+d.mod.cov <- function(var){
+  
+  dm <- d_cov_long |> 
+    group_by(ID, timing, condition) |> 
+    slice(1) |> 
+    select({{var}}, timing, condition, ID) |> 
+    rename(value = {{var}}) |> 
+    mutate(timing = factor(timing, levels = c("pre", "post")),
+           condition = factor(condition, levels = c("cont", "exp") ))
+  
+  dsum <- dm |> 
+    ungroup() |> 
+    group_by(timing, condition) |> 
+    summarise(m = mean(value, na.rm = T),
+              cil = ci_low(value),
+              cih = ci_high(value))
+  
+  res <- list(
+    dm = dm,
+    dsum = dsum
+  )
+  
+  return(res)
+}
+
+```
+
+
+### HR
+
+```{r hr_mod}
+d.hr <- d.mod.cov(hr)$dm
+
+mod.hr <- lmer(value ~ timing*condition + (1|ID), data = d.hr)
+cooks_outliers(mod.hr, d.hr)
+
+check_mod_tms(mod.hr, d.hr)
+
+
+
+```
+
+The random effects follow a normal distribution with fat tails, relatively symmetrical. Residuals are homoskedastic. Residuals do not follow normality in the post:exp factor. Cooks distance < 1 suggest little influence of deviated data point. 
+
+```{r hr_estim}
+an_hr <- anova(mod.hr, ddf = "Kenward-Roger") |> tidy()
+an_hr |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+```
+
+### BR
+
+```{r br}
+# BR
+d.br <- d.mod.cov(br)$dm
+
+
+mod.br <- lmer(value ~ timing*condition + (1|ID), data = d.br)
+cooks_outliers(mod.br, d.br)
+check_mod_tms(mod.br, d.br)
+
+
+
+```
+
+Normal effects appear slighlty deviated from normality. Residuals are homoskedastic. Residuals do not follow normality in the post:exp factor. Cooks distance < 1 suggest little influence of deviated data point. 
+
+```{r br_estim}
+an_br <- anova(mod.br, ddf = "Kenward-Roger") |> tidy()
+an_br |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+```
+
+
+### SBP
+
+```{r sbp}
+
+d.sbp <- d.mod.cov(sbp)$dm
+
+mod.sbp <- lmer(value ~ timing*condition + (1|ID), data = d.sbp)
+cooks_outliers(mod.sbp, d.sbp)
+
+check_mod_tms(mod.sbp, d.sbp)
+
+
+```
+
+Random effects are normally distributed. Residuals are homoskedastic and normally distributed across factors. No outlier is detected.
+
+```{r sbp_estim}
+
+an_sbp <- anova(mod.sbp, ddf = "Kenward-Roger") |> tidy()
+an_sbp |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+```
+
+
+### DBP
+
+```{r dbp}
+d.dbp <- d.mod.cov(dbp)$dm
+mod.dbp <- lmer(value ~ timing*condition + (1|ID), data = d.dbp)
+d.dbp.noOut <- cooks_outliers(mod.dbp, d.dbp)
+
+mod.dbp.noOut <- lmer(value ~ timing*condition + (1|ID), data = d.dbp.noOut)
+check_mod_tms(mod.dbp.noOut, d.dbp.noOut)
+
+```
+
+
+Random effects are normally distributed. Residuals are homoskedastic. One data point was found to display a cook's distance > 1 and was removed. Slight deviations from normality appear pre:exp and pre:cont factors. No other outlier is detected. The model is estimated. 
+
+
+```{r dbp_estim}
+an_dbp <- anova(mod.dbp.noOut, ddf = "Kenward-Roger") |> tidy()
+an_dbp |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+```
+
+
+Models estimated are collated in one table and effects size are computed ($\omega^2 adjusted$). 
+
+### Table models
+
+```{r mod_cov}
+
+
+df_comp <- rbind(an_hr, an_br, an_sbp, an_dbp) |> 
+      mutate(om2 = as_tibble(F_to_omega2(statistic, NumDF, DenDF))[1] |> pull()) |> 
+  mutate(interpretation = as_tibble(interpret_omega_squared(om2))[1] |> pull() ) 
+
+df_comp$var <- rep(c("HR (BPM)", "BR (CPM)", "SBP (mmHg)", "DBP (mmHg)"),each = 3)
+
+df_comp$var2 <- rep(c("HR", "BR", "SBP", "DBP"),each = 3)
+
+#df_comp$p.corr <- p.adjust(df_comp$p.value, method = "BH")
+
+t_comp <- df_comp |> 
+  select(var, term, sumsq, meansq, NumDF, DenDF, statistic, p.value,  om2, interpretation) |>
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  flextable() |> 
+  colformat_double(digits = 3) |> 
+  set_header_labels(var = "Variables", term = "Term", sumsq = "SS",meansq = "MS", NumDF = "Df num", DenDF = "Df den", statistic = "F value", p.value = "p", om2 = "\u03C9\u00B2\u209A", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Variables", "Term","SS", "MS", "Df num", "Df den", "F value", "p value", "Effect size" ), colwidths = c(1,1,1,1,1,1,1,1,2)
+                 ) |>  
+  hline(i = c(3, 6, 9, 12), border = dash_border)  |> 
+    merge_v(j = c(1,2,3), part = "body") |> 
+  merge_v(part = "header") |>
+  valign(part = "body", valign = "top") |> 
+    bold(part = "header")  |> 
+    autofit() |> 
+  bg(i = ~ p.value < 0.05, j = 8, bg = "yellow") |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Abreviations: HR, Heart rate; BR, Breating rate; SBP, Systolic blood pressure; DBP, Diastolic blood pressure; BPM, Beats per minute; CPM, Cycles per minute; mmHg, millimeter of mercury; SS, Sum of squares; MS, Mean squares; Df, Degrees of freedom."))
+
+# I significant: HR, BR, SBP, DBP, quad, forearm
+# main effect significant: duration timing and condition
+
+t_comp
+
+save_as_docx(t_comp,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_comp_modcov.docx")
+
+```
+
+### Table pairwise comparisons
+
+
+```{r contrasts_models}
+fun_emm <- function(mod, var.name){
+  emm <- emmeans(mod, ~timing*condition)
+  pairs.t <- pairs(emm, simple = "timing", adjust = "bonferroni") |>  as_tibble()
+  pairs.t.ci <- pairs(emm, simple = "timing", adjust = "bonferroni") |> 
+    confint() |> as_tibble()
+  pairs.t.full <- full_join(pairs.t, pairs.t.ci)
+  
+    pairs.c <- pairs(emm, simple = "condition", adjust = "bonferroni") |>  as_tibble()
+  pairs.c.ci <- pairs(emm, simple = "condition", adjust = "bonferroni") |> 
+    confint() |> as_tibble()
+  pairs.c.full <- full_join(pairs.c, pairs.c.ci)
+  pairs <- full_join(pairs.t.full, pairs.c.full) |> 
+    select(condition, timing, contrast, estimate, lower.CL, upper.CL, everything())
+  pairs$var <- rep(var.name, nrow(pairs))
+  return(pairs)
+  
+} # function for pairwise comparisons of significant interactions
+
+l_emm <- list()
+
+l_mod <- list(
+  mod.hr = mod.hr, 
+  mod.br = mod.br, 
+  mod.sbp = mod.sbp, 
+  mod.dbp = mod.dbp
+            )
+
+vars <- c("HR (BPM)", "BR (CPM)", "SBP (mmHg)", "DBP (mmHg)")
+
+for (i in 1:length(vars)){
+  l_emm[[i]] <- fun_emm(l_mod[[i]], vars[i])
+}
+
+
+df_cont <- rbind(l_emm[[1]],l_emm[[2]], l_emm[[3]], l_emm[[4]] )|> 
+  rename(statistic = t.ratio) |> 
+  rowwise() |> 
+  mutate(d_r = as_tibble(t_to_d(statistic, df, paired = T)[1]) |> pull(),   interpretation = as.character(as_tibble(interpret_cohens_d(t_to_d(statistic, df, paired = T)))[5] |> pull())) 
+
+
+
+df_cont$method <- rep("Paired t-test", nrow(df_cont)) # pairwise comparisons of model above are collated in a data frame 
+```
+
+
+Normality assessment of of room temperature, room humidity, RPE, SSS, STAI-Y1.
+
+
+```{r normality}
+# contrast cont vs exp 
+d.cont.simple <- data |> 
+  select(ID, condition, RPE, room_temp, room_humidity, SSS, STAI_1) |> 
+  group_by(ID, condition) |> 
+  slice(1) |> 
+  mutate(across(c(RPE, room_temp, room_humidity, SSS, STAI_1), as.numeric)) |>
+  pivot_longer(cols = c(RPE, room_temp, room_humidity, SSS, STAI_1), names_to = "var", values_to = "values") 
+
+# normality assessment
+
+
+d.cont.simple |> 
+  pivot_wider(names_from = condition, values_from = values) |> 
+  mutate(delta = exp - cont) |> 
+  ggplot(aes(x = delta)) +
+  geom_density() +
+  facet_wrap(~var, scales = "free") + my_theme()
+
+d.cont.simple |> 
+  pivot_wider(names_from = condition, values_from = values) |> 
+  mutate(delta = exp - cont) |> 
+  ggplot(aes(sample = delta)) +
+  geom_qq() + 
+  geom_qq_line() +
+  facet_wrap(~var, scales = "free") + my_theme()
+```
+
+Room humidity and room temperature values appear normally distributed. Scores of RPE, SSS, and STAI-Y1 violate normaly assumptions. 
+
+
+```{r paired_tests}
+
+
+# RPE
+d.rpe <- d.cont.simple |>  
+  pivot_wider(names_from = condition, values_from = values) |>
+  filter(var == "RPE")
+
+n_pairs <- d.rpe |>  # number of non-null pairs
+  mutate(delta = cont - exp) |> 
+  filter(delta != 0) |> 
+  nrow()
+  
+pairs.rpe <- wilcox.test(d.rpe$cont, d.rpe$exp, paired = T, conf.int = T, exact = F) |> tidy() |> 
+  select(estimate, conf.low,conf.high, statistic, p.value) |> 
+  rename(lower.CL = conf.low ) |> 
+  rename(upper.CL = conf.high)  |> 
+  mutate()
+pairs.rpe$method <- "Wilcoxon signed-rank test"
+pairs.rpe$timing  <- "post"
+pairs.rpe$contrast = "cont - exp"
+pairs.rpe$var <- "RPE (6 - 20)"
+pairs.rpe$df <- n_pairs
+pairs.rpe$d_r <- as_tibble(rank_biserial(d.rpe$cont, d.rpe$exp, paired = T)$r_rank_biserial) |> pull()
+pairs.rpe$interpretation <- as.character(as_tibble(interpret_rank_biserial(rank_biserial(d.rpe$cont, d.rpe$exp, paired = T), rules = "gignac2016")$Interpretation) |> pull())
+
+
+
+df_cont <- full_join(df_cont, pairs.rpe) 
+
+
+# room_temp
+d.rt <- d.cont.simple |> 
+  pivot_wider(names_from = condition, values_from = values) |>
+  filter(var == "room_temp") 
+
+pairs.rt <- t.test(d.rt$cont, d.rt$exp, paired = T) |> 
+  tidy() |> 
+  select(estimate, conf.low, conf.high,  statistic, p.value, parameter, method ) |> 
+  rename(df = parameter) |> 
+  rename(lower.CL = conf.low ) |> 
+  rename(upper.CL = conf.high) |> 
+    rowwise() |> 
+  mutate(d_r = as_tibble(t_to_d(statistic, df, paired = T)[1]) |> pull(),
+         interpretation = as.character(as_tibble(interpret_cohens_d(t_to_d(statistic, df, paired = T)))[5] |> pull())) 
+
+pairs.rt$timing  <- "pre"
+pairs.rt$contrast = "cont - exp"
+pairs.rt$var <- "Room temperature (°C)"
+
+df_cont <- full_join(df_cont, pairs.rt)
+
+
+# room_humidity
+d.rh <- d.cont.simple |> 
+  pivot_wider(names_from = condition, values_from = values) |>
+  filter(var == "room_humidity") 
+
+pairs.rh <- t.test(d.rh$cont, d.rh$exp, paired = T) |> 
+  tidy() |> select(estimate, conf.low, conf.high,  statistic, p.value, parameter, method ) |> 
+  rename(df = parameter) |> 
+  rename(lower.CL = conf.low ) |> 
+  rename(upper.CL = conf.high)|> 
+    rowwise() |> 
+  mutate(d_r = as_tibble(t_to_d(statistic, df, paired = T)[1]) |> pull(),
+         interpretation = as.character(as_tibble(interpret_cohens_d(t_to_d(statistic, df, paired = T)))[5] |> pull())) 
+
+pairs.rh$timing  <- "pre"
+pairs.rh$contrast = "cont - exp"
+pairs.rh$var <- "Room humidity (%)"
+
+
+df_cont <- full_join(df_cont, pairs.rh)
+
+# STAI1
+d.stai1 <- d.cont.simple |>  
+  pivot_wider(names_from = condition, values_from = values) |>
+  filter(var == "STAI_1")
+
+n_pairs <- d.stai1 |>  # number of non-null pairs
+  mutate(delta = cont - exp) |> 
+  filter(delta != 0) |> 
+  nrow()
+  
+pairs.stai1 <- wilcox.test(d.stai1$cont, d.stai1$exp, paired = T, conf.int = T, exact = F) |> tidy() |> 
+  select(estimate, conf.low,conf.high, statistic, p.value) |> 
+  rename(lower.CL = conf.low ) |> 
+  rename(upper.CL = conf.high)  |> 
+  mutate()
+pairs.stai1$method <- "Wilcoxon signed-rank test"
+pairs.stai1$timing  <- "pre"
+pairs.stai1$contrast = "cont - exp"
+pairs.stai1$var <- "STAI-Y1 (/80)"
+pairs.stai1$df <- n_pairs
+
+pairs.stai1$d_r <- as_tibble(rank_biserial(d.stai1$cont, d.stai1$exp, paired = T)$r_rank_biserial) |> pull()
+
+pairs.stai1$interpretation <- as.character(as_tibble(interpret_rank_biserial(rank_biserial(d.stai1$cont, d.stai1$exp, paired = T), rules = "gignac2016")$Interpretation) |> pull())
+
+
+df_cont <- full_join(df_cont, pairs.stai1) 
+
+
+# SSS
+
+d.sss <- d.cont.simple |>  
+  pivot_wider(names_from = condition, values_from = values) |>
+  filter(var == "SSS")
+
+n_pairs <- d.sss |>  # number of non-null pairs
+  mutate(delta = cont - exp) |> 
+  filter(delta != 0) |> 
+  nrow()
+  
+pairs.sss <- wilcox.test(d.sss$cont, d.sss$exp, paired = T, conf.int = T, exact = F) |> tidy() |> 
+  select(estimate, conf.low,conf.high, statistic, p.value) |> 
+  rename(lower.CL = conf.low ) |> 
+  rename(upper.CL = conf.high)  |> 
+  mutate()
+pairs.sss$method <- "Wilcoxon signed-rank test"
+pairs.sss$timing  <- "pre"
+pairs.sss$contrast = "cont - exp"
+pairs.sss$var <- "SSS (/7)"
+pairs.sss$df <- n_pairs
+
+pairs.sss$d_r <- as_tibble(rank_biserial(d.sss$cont, d.sss$exp, paired = T)$r_rank_biserial) |> pull()
+
+pairs.sss$interpretation <- as.character(as_tibble(interpret_rank_biserial(rank_biserial(d.sss$cont, d.sss$exp, paired = T), rules = "gignac2016")$Interpretation) |> pull())
+
+
+df_cont <- full_join(df_cont, pairs.sss) 
+
+
+
+
+```
+
+
+Pairwise comparisons of significant interactions or main effects from models and paired tests are collated in one table.  
+
+```{r table_pairwise}
+
+t1_contrasts <- df_cont |> 
+  select(var, timing, condition, contrast, estimate,lower.CL, upper.CL,  SE,method,df, statistic,p.value, d_r, interpretation ) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value))  |> 
+  flextable() |> 
+  set_header_labels(var = "Variables", timing = "Timing", condition = "Condition", contrast = "Contrast", estimate = "Difference", lower.CL = "low", upper.CL = "high",  SE = "SE", method = "Method", df = "Df", statistic = "Statistic", p.value = "p", d_r = "d~z~ / r~rb~", interpretation = "Interpretation")  |> 
+  colformat_md(part = "header", j = 13) |> 
+  add_header_row(values = c("Variables", "Timing", "Condition", "Contrast", "Difference", "CI 95%", "SE", "Method", "Df", "Statistic", "p value", "Effect sizes" ), colwidths = c(1,1,1,1,1,2,1,1,1,1,1, 2)) |> 
+  colformat_double(digits = 3)  |> 
+  valign(part = "body", valign = "top") |> 
+  bold(part = "header")  |> 
+  merge_v(j = c(1), part = "body") |> 
+  bg(i = ~ p.value < 0.05, j = 12, bg = "yellow") |> 
+  merge_v(part = "header") |> 
+  hline(i = c(4, 8, 12, 16,  17,18,19,20), border = dash_border)  |> 
+  autofit()|> 
+  add_footer_lines(values = c("Data from 38 participants. \n Method refers to the statistical test used for the contrast. Degrees of freedeom in case of wilcoxon signed rank test refers to number of non-null pairs. \n Abreviations: HR, Heart rate; BR, Breating rate; SBP, Systolic blood pressure; DBP, Diastolic blood pressure; T, temperature; RPE, Rate of perceived exertion; STAI-Y1, State anxiety questionnaire; SSS, Stanford sleepiness scale; BPM, Beats per minute; CPM, Cycles per minute; mmHg, millimeter of mercury; °C, Celcius degrees;  SE, Standard error; CI 95%, 95% confidence interval; Df, Degrees of freedom; dz, Cohen'd for paired samples; rrb, rank-biserial correlation."))
+
+t1_contrasts 
+save_as_docx(t1_contrasts,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_mcov_contrasts.docx")
+#print(t1_contrasts, preview = "docx")
+```
+
+
+
+### Plots
+
+Data used in model is plotted along with significance results.
+
+```{r plot_cov}
+
+
+# HR
+d.hr.sum <- d.mod.cov(hr)$dsum
+plot.hr <- plot_prepost_an(d.hr, t = "Heart rate", u = "BPM", df_an = df_comp, v = "HR", y = "value") +
+  showSignificance( c(1.05,2.1), max(d.hr.sum$cih) + 0.02*max(d.hr.sum$cih), "*", width = -0.01, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( c(0.9,1.95), tn(d.hr.sum$cih, 2) + 0.05*tn(d.hr.sum$cih,2), "*", width = -0.01, segmentParams = list(col = "#00468BFF"), textParams = list(col = "#00468BFF")) +
+  showSignificance( 2.2, c(min(d.hr.sum$cil),max(d.hr.sum$cih)), "*", width = -0.01) +
+  scale_y_continuous(limits = c(20, 200), breaks = c(40, 80, 120, 160)) +
+  scale_x_discrete(breaks = "") +
+  labs(x = "")
+
+# BR
+d.br.sum <- d.mod.cov(br)$dsum
+plot.br <- plot_prepost_an(d.br, t = "Breating rate", u = "CPM", df_an = df_comp, v = "BR", y = "value")+ showSignificance( c(1.05,2.1), max(d.br.sum$cih) + 0.05*max(d.br.sum$cih), "*", width = -0.01,  segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( 2.2, c(min(d.br.sum$cil),max(d.br.sum$cih)), "*", width = -0.01) +
+  scale_x_discrete(breaks = "") +
+  labs(x = "")
+
+# SBP
+d.sbp.sum <- d.mod.cov(sbp)$dsum
+plot.sbp <- plot_prepost_an(d.sbp, t = "Systolic blood pressure", u = "mmHg", df_an = df_comp, v = "SBP", y = "value") + showSignificance( c(1.05,2.1), max(d.sbp.sum$cih) + 0.05*max(d.sbp.sum$cih), "*", width = -0.01,  segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( 2.2, c(min(d.sbp.sum$cil),max(d.sbp.sum$cih)), "*", width = -0.01)
+
+#DBP
+d.dbp.sum <- d.mod.cov(dbp)$dsum
+plot.dbp <- plot_prepost_an(d.dbp, t = "Diastolic blood pressure", u = "mmHg", df_an = df_comp, v = "DBP", y = "value")+ showSignificance( c(1.05,2.1), max(d.dbp.sum$cih) + 0.05*max(d.dbp.sum$cih), "*", width = -0.01,  segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( 2.2, c(min(d.dbp.sum$cil),max(d.dbp.sum$cih)), "*", width = -0.01)
+
+
+
+
+
+p.cov <- ggarrange(plot.hr, plot.br, plot.sbp, plot.dbp, ncol = 2, nrow = 2, common.legend = T, legend = "top", align = "v", labels = "AUTO" )
+
+
+ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/pcov.png", plot = p.cov, height = 7, width = 7,dpi = 600)
+
+p.cov
+```
+
+### Table results summary
+
+Described results are summarized in a table along with summary statistics.
+
+```{r tab_cov}
+
+d.covar.sum <- d_cov_long |> 
+  select(timing, condition, hr, br, sbp, dbp, ID) |> 
+  pivot_longer(cols = c(hr, br, sbp, dbp), 
+               names_to = c("var"),values_to = "values" ) |> 
+  group_by(var, condition, timing) |> 
+  summarise(m = mean(values), 
+            sd = sd(values),
+            md = median(values), 
+            iqr = IQR(values)) 
+
+d.cont.simple.sum <- d.cont.simple |> 
+  group_by(var, condition) |>
+    summarise(m = mean(values), 
+            sd = sd(values),  
+            md = median(values), 
+            iqr = IQR(values)) 
+
+
+  
+df_t2 <- full_join(d.covar.sum,d.cont.simple.sum ) |> 
+  mutate(across(c(m, sd), round, 2)) |> 
+  mutate(
+    msd = glue("{m} ± {sd}"),
+    med_iqr = glue("{md} [{iqr}]^a^")) |> 
+  select(-m, -sd, -md, -iqr) |> 
+  pivot_wider(names_from = condition, values_from = c(msd, med_iqr)) |> 
+mutate(msd_exp = if_else(var %in% c("RPE", "SSS", "STAI_1"), med_iqr_exp, msd_exp),
+       msd_cont = if_else(var %in% c("RPE", "SSS", "STAI_1"), med_iqr_cont, msd_cont)
+       ) |> 
+  rename(cont = msd_cont) |> 
+  rename(exp = msd_exp) |> 
+  select(-starts_with("med")) |> 
+  mutate(timing = if_else(var %in% c("room_humidity", "room_temp", "SSS", "STAI_1"),  "pre", timing),
+          timing = if_else(var == "RPE", "post", timing)) |> 
+pivot_wider(names_from = timing, values_from = c(exp, cont))  |> 
+  select(var, cont_pre, exp_pre, cont_post, exp_post) |> 
+  mutate(var = factor(var, levels = c("hr", "br", "sbp", "dbp", "RPE", "SSS", "STAI_1", "room_humidity", "room_temp"), labels = c("HR (BPM)", "BR (CPM)", "SBP (mmHg)", "DBP (mmHg)", "RPE (6 - 20)", "SSS (/7)", "STAI-Y1 (/80)", "Room humidity (%)","Room temperature (°C)"))) |> 
+  arrange(var)
+
+
+
+p_inter <- df_comp |> filter(term == "timing:condition") |> 
+  mutate(across(c(NumDF, DenDF, statistic), round, 2)) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  mutate(res = glue("F~{NumDF},{DenDF}~ = {statistic}")) |> 
+    mutate(var = factor(var, levels= c("HR (BPM)", "BR (CPM)", "SBP (mmHg)", "DBP (mmHg)"))) |> 
+  arrange(var)
+
+
+p_cont <- df_cont |> 
+  filter(var %in% c("RPE (6 - 20)", "SSS (/7)", "STAI-Y1 (/80)", "Room temperature (°C)", "Room humidity (%)")) |> 
+  mutate(var = factor(var, levels = c("RPE (6 - 20)", "SSS (/7)", "STAI-Y1 (/80)", "Room temperature (°C)", "Room humidity (%)"))) |> 
+  mutate(across(c(statistic, df), round, 2)) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  mutate(stat = if_else(method == "Paired t-test", "t", "V")) |> 
+  mutate(res = glue("{stat}~{df}~ = {statistic}"))   |> 
+  arrange(var)
+
+  
+
+df_t2$stat <- c(p_inter$res, p_cont$res)
+df_t2$p.value <- c(p_inter$p.value, p_cont$p.value)
+
+
+t2 <- df_t2 |> 
+  flextable() |> 
+  set_header_labels(var = "Variables", cont_pre = "Control", exp_pre = "Exercise", cont_post = "Control", exp_post = "Exercise", stat = "Stat~df~", p.value = "p") |> 
+  add_header_row(values = c("Variables", "Pre", "Post", "Timing x Condition interaction / Pairwise comparison"), colwidths = c(1, 2,2,2)) |> 
+  bold(part = "header") |> 
+  merge_v(part = "header") |> 
+  align(part = "header", align = "center") |> 
+  vline(j = c(1,3,5), border = dash_border) |> 
+  autofit()  |> 
+  colformat_md(part = "all", j = 1:7) |> 
+  add_footer_lines(values = c("a Median [interquartile range]. Data from 38 participants.  \n Abreviations: HR, Heart rate; BR, Breating rate; SBP, Systolic blood pressure; DBP, Diastolic blood pressure; T, temperature; BPM, Beats per minute; CPM, Cycles per minute; mmHg, millimeter of mercury; RPE, Rate of perceived exertion; °C, Celsius degrees;  Df, Degrees of freedom")) 
+t2
+#print(t1, preview = "docx")
+
+save_as_docx(t2,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t1.docx")
+
+```
+
+
+
+## Carry over effect
+
+Before to compute the model, we test for potential carry-over effects. Although unlikely, it would be possible that the carry over effect of receiving exercise in the first session impacts more the results on the second session than the other way around. 
+
+First, we visualise the absolute change (post intervention - pre intervention) across sequences (exercise/control vs control/exercise) and conditions (exercise vs control)
+
+```{r carry_viz}
+# inclusion of sequence factor in data set
+# computation of mean absolute change
+s_ppt_q <- data_long |>
+    mutate(seq = glue("{session}_{condition}")) |>
+  rowwise() |> 
+  mutate(test_value = if_else(test_mod %in% c("ppt", "cdt"), logt(test_value), test_value)) |> 
+  select(ID, order, test_mod,timing,  site, session , condition, test_value, seq) |> 
+    mutate(seq = factor(seq)) |>
+    mutate(seq_cont_exp = if_else(seq %in% c("session_1_cont", "session_2_exp"), "cont_exp", "exp_cont")) |>
+    select(-seq) |>
+    mutate(seq = seq_cont_exp) |>
+    select(!seq_cont_exp)|>
+    group_by(ID, condition, test_mod, site, timing) |> 
+  mutate(tm = mean(test_value)) |> 
+  slice(1) |> 
+  select(-test_value) |> 
+  ungroup() |> 
+    pivot_wider(
+      names_from = timing,
+      values_from = tm
+    ) |> 
+    mutate(abc = post - pre) |> 
+  ungroup() |> 
+    group_by(session, seq, condition, test_mod, site) |>
+    summarize(
+      m = mean(abc, na.rm = T),
+      s = sd(abc, na.rm = T)
+    )
+
+co_seq <- s_ppt_q |> # sequence plot
+    ggplot(aes(x = session, y = m, col = seq, group = seq)) +
+    geom_point() +
+    geom_line() +
+    facet_grid(rows = vars(test_mod), cols = vars(site), scale = "free_y") +
+  labs(title = "Absolute change ~ session * sequence")
+
+co_cond <- s_ppt_q |> # condition plot
+    ggplot(aes(x = session, y = m, col = condition, group = condition)) +
+    geom_point() +
+    geom_line() +
+    facet_grid(rows = vars(test_mod), cols = vars(site), scale = "free_y") +
+  labs(title = "Absolute change ~ session * condition")
+
+co_seq
+co_cond
+```
+
+Mean absolute change values appear greater in exp_cont vs cont_exp in both sessions for hpt quadriceps, and pp quadriceps and forearm; they appear greater in cont_exp vs exp_cont for ppt forearm. This suggests a possible carry-over effects of sequences. A slight increase of mean absolute change values in observed across sessions for ppt quad, ppt forearm, cdt quad, cdt forearm. 
+
+Possible carry over effects are tested by comparing the sum of absolute change in each sequence using t test for each test modality:site. P values are corrected for false discovery rate. 
+
+```{r function carry}
+# this is a script to understand how to take into account carry over effects in within subj design
+# it is based on Shen et al., Estimate Carryover Effect in Clinical Trial Crossover Designs
+# Vladimir Aron
+# 20240521
+
+
+carry_test <- function(data,s , test_m ) {
+  
+ ## data <- data_long
+ # s <- "no site"
+ # test_m <- "adt"
+  
+  co <- data |>
+    rowwise() |> 
+    mutate(test_value = if_else(test_mod %in% c("ppt", "cdt"), logt(test_value), test_value)) |>
+    mutate(seq = glue("{session}_{condition}")) |>
+    mutate(seq = factor(seq)) |>
+    mutate(seq_cont_exp = if_else(seq %in% c("session_1_cont", "session_2_exp"), "cont_exp", "exp_cont")) |>
+    select(-seq) |>
+    mutate(seq = seq_cont_exp) |>
+    select(!seq_cont_exp)
+  #  filter(site == "quad", test_mod == "ppt")
+ 
+  
+  
+  qppt <- co |>
+    select(ID, order, test_mod,timing,  site, session , condition, test_value, seq)  |> 
+    group_by(ID, condition, test_mod, site, timing) |> 
+    mutate(tm = mean(test_value)) |> 
+    slice(1) |> 
+    select(!test_value) |>
+    ungroup() |> 
+    filter(site == s, test_mod == test_m) |> 
+    ungroup() |> 
+    pivot_wider(
+      names_from = timing,
+      values_from = tm
+    ) |> 
+    mutate(abc = post - pre) |> 
+    ungroup() |>
+    select(ID, seq, session, condition, abc) |>
+    arrange(ID) 
+  
+  qppt.s <- qppt |>
+    group_by(ID) |>
+    mutate(sum = sum(abc))
+  
+  qppt.s.ab <- subset(qppt.s, seq == "exp_cont") |>
+    group_by(ID) |>
+    slice(1)
+  
+  qppt.s.ba <- subset(qppt.s, seq == "cont_exp") |>
+    group_by(ID) |>
+    slice(1)
+  
+  # returns a tibble
+  t_res <- t.test(qppt.s.ab$sum, qppt.s.ba$sum)
+  res <- broom::tidy(t_res)
+  
+  
+
+}
+```
+
+
+```{r carry_test}
+
+df <- data.frame(
+  site = c(rep("quad", 4), rep("forearm", 4), "no site"),
+  test_mod = c(rep(levels(data_long$test_mod)[-5],2),"adt")
+           )
+
+df_e <- rbind(
+  carry_test(data_long, s = df[1,1], test_m = df[1,2]),
+  carry_test(data_long,s = df[1,1], test_m= df[2,2]),
+  carry_test(data_long,s = df[1,1], test_m= df[3,2]),
+  carry_test(data_long,s = df[1,1], test_m = df[4,2]),
+  carry_test(data_long,s = df[5,1], test_m = df[1,2]),
+  carry_test(data_long,s = df[5,1], test_m = df[2,2]),
+  carry_test(data_long,s = df[5,1], test_m = df[3,2]),
+  carry_test(data_long,s = df[5,1], test_m = df[4,2]),
+  carry_test(data_long,s = df[9,1], test_m = df[9,2])
+  
+  
+)
+
+
+co_df <- cbind(df, df_e) |> 
+  rename("exp_cont" = "estimate1",
+         "cont_exp" = "estimate2") |> 
+  select(-parameter, -method, -alternative, conf.low, conf.high, -statistic) |> ungroup()
+
+co_df$p_corr <- p.adjust(co_df$p.value, method = "BH")
+
+t_carry <- co_df |> 
+  mutate(test_mod = toupper(test_mod)) |> 
+  select(site, test_mod, exp_cont, cont_exp, estimate, conf.low, conf.high, p.value, p_corr) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value),
+         p_corr = pvalue_format_table(p_corr)) |> 
+  mutate(site = factor(site, levels = c("forearm", "quad", "nosite") , labels = c("Forearm", "Quadriceps", "No site"))) |> 
+  flextable() |> 
+  set_header_labels(site = "Site", test_mod = "Test modalities", exp_cont = "Exp/Cont", cont_exp = "Cont/Exp", estimate = "Sum difference", conf.low = "low", conf.high = "high", p.value = "p", p_corr = "p corr") |> 
+  add_header_row(
+    values = c("Site", "Test modalities","Sum absolute change", "Sum difference","CI 95%", "p", "p corr"),
+    colwidths = c(1, 1, 2,1,2, 1, 1)
+  ) %>%
+  colformat_double(digits = 3) |> 
+  bold(part = "header") |> 
+  merge_at(j = 1, i = 1:4) %>%
+  merge_at(j = 1, i = 5:8,part = "body") %>%
+  merge_v(part = "header") |> 
+  hline(i = c(4,8), border = dash_border) %>%
+  autofit() |> 
+  add_footer_lines(values = c("Data from 38 participants.\n Units: CDT, log; HPT, °C; PP, VAS 100 - 0; PPT, log.\n Abbreviations: CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Mechanical pinprick rating; PPT, Pressure pain threshold; CI 95%, 95% confidence interval; p corr, p value ajdusted with false discovery rate."))
+  
+ts2 <- set_table_properties(t_carry, layout = "autofit")
+#print(ts2, preview = "docx")
+ts2
+
+save_as_docx(ts2,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_carry.docx")
+
+
+```
+No significant carry-over effect is observed. 
+
+
+## Reliability of pre values
+
+Reliability of pre intervention values for each test modality and site is assessed by computing ICC(3,k)
+
+```{r reliab_function}
+# function to compute reliability of pre values
+
+# 20240527
+# Vladimir Aron
+
+
+
+rel_pre <- function(data, anov = T) {
+  # function that analyze reliaiblity of wp1b EIH data using ICC function from psych package
+  # outputs tables with ICC 
+  # input: data set (data_long) and anov relates to computation method in ICC function: anova vs lme; default: ANOVA 
+  
+  data.rel <- function(data, s, tm) { 
+    # mean values of three measurements are computed
+    d <- data |>
+      filter(timing == "pre") |> 
+      group_by(ID, session, test_mod, site) |> 
+      mutate(m = mean(test_value, na.rm = T)) |> 
+      rowwise() |> 
+      mutate(m = if_else(test_mod %in% c("cdt", "ppt"), logt(m), m)) 
+    
+  
+    data.mod.s1 <- d |>
+      filter(site == s, test_mod == tm, session == "session_1") |>
+      group_by(ID) |>
+      slice(1)
+    data.mod.s2 <- d |>
+      filter(site == s, test_mod == tm, session == "session_2") |>
+      group_by(ID) |>
+      slice(1)
+    
+    d <- cbind(data.mod.s1$m, data.mod.s2$m) # returns a df of individual values for each session
+    return(d)
+  }
+  
+  
+  data.rel.qppt <- data.rel(data, s = "quad", tm ="ppt")
+  data.rel.qcdt <- data.rel(data, s = "quad", tm ="cdt")
+  data.rel.qhpt <- data.rel(data, s = "quad", tm ="hpt")
+  data.rel.qpp <- data.rel(data, s = "quad", tm ="pp")
+  
+  data.rel.fppt <- data.rel(data, s = "forearm", tm ="ppt")
+  data.rel.fcdt <- data.rel(data, s = "forearm", tm ="cdt")
+  data.rel.fhpt <- data.rel(data, s = "forearm", tm ="hpt")
+  data.rel.fpp <- data.rel(data, s = "forearm", tm ="pp")
+  
+  data.rel.adt <- data.rel(data, s = "no site", tm = "adt")
+  
+  
+ if (anov == T) {
+    icc.res.qppt <- psych::ICC(data.rel.qppt, lmer = F)
+    icc.res.qcdt <- psych::ICC(data.rel.qcdt, lmer = F)
+    icc.res.qhpt <- psych::ICC(data.rel.qhpt, lmer = F)
+    icc.res.qpp <- psych::ICC(data.rel.qpp, lmer = F)
+    
+    icc.res.fppt <- psych::ICC(data.rel.fppt, lmer = F)
+    icc.res.fcdt <- psych::ICC(data.rel.fcdt, lmer = F)
+    icc.res.fhpt <- psych::ICC(data.rel.fhpt, lmer = F)
+    icc.res.fpp <- psych::ICC(data.rel.fpp, lmer = F)
+    
+    icc.res.adt <- psych::ICC(data.rel.adt, lmer = F)
+    
+    comput <- "anova"
+  } else {
+    icc.res.qppt <- psych::ICC(data.rel.qppt, lmer = T)
+    icc.res.qcdt <- psych::ICC(data.rel.qcdt, lmer = T)
+    icc.res.qhpt <- psych::ICC(data.rel.qhpt, lmer = T)
+    icc.res.qpp <- psych::ICC(data.rel.qpp, lmer = T)
+    
+    icc.res.fppt <- psych::ICC(data.rel.fppt, lmer = T)
+    icc.res.fcdt <- psych::ICC(data.rel.fcdt, lmer = T)
+    icc.res.fhpt <- psych::ICC(data.rel.fhpt, lmer = T)
+    icc.res.fpp <- psych::ICC(data.rel.fpp, lmer = T)
+    
+    icc.res.adt <- psych::ICC(data.rel.adt, lmer = T)
+    comput <- "lme"
+  }
+  
+
+  
+  
+  
+  icc_df <- rbind(
+    icc.res.qppt$results |> filter(type == "ICC3k"),
+    icc.res.qcdt$results |> filter(type == "ICC3k"),
+    icc.res.qhpt$results |> filter(type == "ICC3k"),
+    icc.res.qpp$results |> filter(type == "ICC3k"),
+    
+    icc.res.fppt$results |> filter(type == "ICC3k"),
+    icc.res.fcdt$results |> filter(type == "ICC3k"),
+    icc.res.fhpt$results |> filter(type == "ICC3k"),
+    icc.res.fpp$results |> filter(type == "ICC3k"),
+    
+    icc.res.adt$results |> filter(type == "ICC3k")
+  )
+  
+  icc_df$site <- c(rep("quad",4), rep("forearm",4), "nosite")
+  icc_df$test_mod <- c(rep(c("PPT", "CDT", "HPT", "PP"),2), "ADT")
+  row.names(icc_df) <- NULL
+
+  
+  t.icc <- icc_df |>
+    select(site,test_mod, ICC, `lower bound`, `upper bound`) |>
+    mutate(across(is.numeric, round, 2)) |>
+    kbl(caption = paste("ICC values (", comput, ") at all sites & test modalities"),
+        col.names = c(site = "Site", test_mod = "Test modality", ICC = "ICC(3C,k)", `lower bound` = "CI low", `upper bound` = "CI high")) |>
+    kable_minimal() |> 
+    collapse_rows(columns = 1, valign = "top")
+  
+
+  
+  
+  
+  results <- list(
+    "t.icc" = t.icc,
+    "icc.df" = icc_df
+    
+  )
+  
+  return(results)
+}
+
+```
+
+
+```{r reliab_ts3}
+
+
+t_rel <- rel_pre(data_long)$icc.df  |> 
+  select(site,test_mod, ICC, `lower bound`, `upper bound`) |>
+  mutate(site = factor(site, levels = c("forearm", "quad", "nosite"), labels = c("Forearm", "Quadriceps", "No site"))) |> 
+  flextable() |> 
+  colformat_double(digits = 2) |> 
+  set_header_labels(site = "Site", test_mod = "Test modalities", ICC = "ICC" ,`lower bound` = "low",`upper bound` = "high") |> 
+  add_header_row(values = c("Site", "Test modalities", "ICC", "CI 95%"), colwidths = c(1,1,1,2))|> 
+  bold(part = "header") |> 
+  merge_at(j = 1, i = 1:4) %>%
+  merge_at(j = 1, i = 5:8,part = "body") %>%
+  merge_v(part = "header") |> 
+  hline(i = c(4,8), border = dash_border) %>%
+  autofit() |> 
+  add_footer_lines(values = c("Data from 38 participants.\n Abbreviations: CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Mechanical pinprick rating; PPT, Pressure pain threshold; ICC, Intraclass correlation coefficient; CI 95%, 95% confidence interval."))
+
+
+
+ts3 <- set_table_properties(t_rel, layout = "autofit")
+#print(ts3, preview = "docx")
+ts3
+
+save_as_docx(ts3,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_rel.docx")
+
+```
+All ICC are > 0.7 suggesting that sensory testing is reliable. 
+
+
+
+## Skin temperature
+
+Finally, we analyse the changes in skin temperature before and after each condition at both forearms and quadriceps. 
+
+```{r distributions}
+
+# long format skin temperature data set
+d_long_temp <- data |> 
+  select(starts_with("temp"), condition, ID) |> 
+  select(-temp_room) |> 
+  mutate(across(starts_with("temp"), as.numeric)) |> 
+  pivot_longer(cols = starts_with("temp"),
+               names_to = c("temp_t","site_t", "time_t","dominance_t"),
+               names_pattern = "(^\\w+)_(\\w+)_(\\w+)_(\\w+)",
+               values_to = c("temp")) |> 
+  mutate(site = paste0(site_t, "_", dominance_t)) |> 
+  select(- site_t, -dominance_t, -temp_t) |> 
+  mutate(
+    time_t = factor(time_t, levels = c("pre1", "pre2", "post1", "post2")),
+    site = factor(site),
+    condition = factor(condition, levels = c("exp", "cont"))) |>
+    group_by(ID, condition, site, time_t) |> 
+    slice(1)  |> 
+  na.omit() 
+
+# mean post - pre temperature values
+delta_temp <- d_long_temp |> 
+  pivot_wider(names_from = "time_t", values_from = "temp") |> 
+  mutate(pre = (pre1 + pre2)/2,
+         post = (post1 + post2)/2,
+         abc_temp = post - pre) |> 
+  mutate(condition = factor(condition, levels = c("cont", "exp"), labels = c("Control", "Exercise")),
+         
+         site = factor(site, levels = levels(factor(d_long_temp$site)), labels = c("Dominant forearm", "Non-dominant forearm", "Dominant quadriceps", "Non-dominant quadriceps"))
+         )
+
+
+
+# long format mean temperature
+d_temp_mean <- delta_temp |> 
+     pivot_longer(cols = c("pre", "post"), names_to = "timing", values_to = "temp") |> 
+   mutate(timing = factor(timing, levels = c("pre", "post"), labels = c("Pre", "Post")))
+
+# delta temperature summary data set
+delta_temp_sum <- delta_temp  |> 
+  group_by(condition, site) |> 
+  summarise(m = mean(abc_temp),
+            sd = sd(abc_temp),
+            cil = ci_low(abc_temp),
+            cih = ci_high(abc_temp)) |> 
+  mutate(cond_s = paste(condition, site)) |> 
+  arrange(cond_s) %>%
+      mutate(unique_cond = paste(condition, site)) %>% 
+  arrange(unique_cond)
+
+# mean temp summary data set
+d_temp_sum <- d_temp_mean |> 
+  group_by(site, condition, timing) |> 
+  summarise(
+    m = mean(temp),
+    sd = sd(temp),
+    cil = ci_low(temp),
+    cih = ci_high(temp)
+  ) 
+# pre value normality
+delta_temp |> 
+  select(condition, site, pre) |> 
+  ungroup() |> 
+  group_by(condition, site) |> 
+  shapiro_test(pre)
+
+delta_temp |> 
+  ggplot(aes(sample = pre)) +
+  stat_qq() +
+  stat_qq_line(col = "red") +
+  facet_grid(cols = vars(condition), rows = vars(site)) +
+  my_theme()
+
+delta_temp |> 
+  ggplot(aes(x= pre)) +
+  geom_histogram(aes(y = after_stat(density))) +
+  geom_density(fill = "red", alpha = 0.5) +
+  facet_grid(cols = vars(condition), rows = vars(site)) +
+  my_theme()
+
+# post value normality
+delta_temp |> 
+  select(condition, site, post) |> 
+  ungroup() |> 
+  group_by(condition, site) |> 
+  shapiro_test(post)
+
+delta_temp |> 
+  ggplot(aes(sample = post)) +
+  stat_qq() +
+  stat_qq_line(col = "red") +
+  facet_grid(cols = vars(condition), rows = vars(site)) +
+  my_theme()
+
+delta_temp |> 
+  ggplot(aes(x= post)) +
+  geom_histogram(aes(y = after_stat(density))) +
+  geom_density(fill = "red", alpha = 0.5) +
+  facet_grid(cols = vars(condition), rows = vars(site)) +
+  my_theme()
+
+# absolute change normality
+delta_temp |>  
+  select(condition, site, abc_temp) |> 
+  ungroup() |> 
+  group_by(condition, site) |> 
+  shapiro_test(abc_temp)
+
+delta_temp |> 
+  ggplot(aes(sample = abc_temp)) +
+  stat_qq() +
+  stat_qq_line(col = "red") +
+  facet_grid(cols = vars(condition), rows = vars(site)) +
+  my_theme()
+
+delta_temp |> 
+  ggplot(aes(x= abc_temp)) +
+  geom_histogram(aes(y = after_stat(density))) +
+  geom_density(fill = "red", alpha = 0.5) +
+  facet_grid(cols = vars(condition), rows = vars(site)) +
+  my_theme()
+  
+  
+
+```
+
+All levels site:condition appear normally distributed except for dominant_quadriceps:control where are negative skew is observed, potentially due to an outlier value. The outlier value is kept. 
+Summary statistics are computed:
+
+```{r summary_stat}
+
+t_summary_temp <- d_long_temp |> 
+  pivot_wider(names_from = "time_t", values_from = "temp") |> 
+  mutate(pre = (pre1 + pre2)/2,
+         post = (post1 + post2)/2,
+         abc_temp = post - pre) |>
+  select(-pre1, -pre2, -post1, -post2) |> 
+  pivot_longer(cols = c("pre", "post", "abc_temp"), names_to = "timing", values_to = "temp") |> 
+  mutate(cond_timing = paste0(timing,"_", condition)) |> 
+  select(-condition, -timing) |> 
+  group_by(site, cond_timing) |> 
+  summarise(m = specify_decimal(mean(temp, na.rm = T),   2), 
+            sd = specify_decimal(sd(temp, na.rm = T),  2),
+            med = specify_decimal(median(temp, na.rm = T),   2),
+            iqr = specify_decimal(IQR(temp, na.rm = T),   2)
+            ) |> 
+  mutate(msd = glue("{m} ± {sd}")
+                       ) |> 
+  select(-m, -sd, - med, -iqr) |> 
+  pivot_wider(names_from = cond_timing, values_from = msd) |> 
+  select(site, pre_cont, post_cont, abc_temp_cont, pre_exp, post_exp, abc_temp_exp) |> 
+  mutate(
+    site = factor(site, levels = levels(factor(d_long_temp$site)), labels = c("Dominant forearm", "Non-dominant forearm", "Dominant quadriceps", "Non-dominant quadriceps"))
+  ) |> 
+  arrange(site) |> flextable() |> 
+  set_header_labels(
+    site = "Site", pre_cont = "Pre", post_cont = "Post" , abc_temp_cont = "Diff~post-pre~", pre_exp = "Pre", post_exp = "Post" , abc_temp_exp = "Diff~post-pre~"
+  ) |> 
+  add_header_row(values = c(
+    "Site", "Control", "Exercise"
+  ), colwidths = c(1,3,3)) |> 
+  colformat_md(part = "all", j = 1:7) |> 
+  merge_v(part = "header") |> 
+  bold(part = "header") |> 
+  align(part = "header", align = "center") |> 
+  autofit() |> 
+  set_table_properties(layout = "autofit") |> 
+    add_footer_lines(values = c("Data from 38 participants. Units: °C"))
+
+
+save_as_docx(t_summary_temp,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_summary_temp.docx")
+
+t_summary_temp
+
+
+
+
+```
+
+Then we estimate the impact of the factors 'site' and 'condition' on the post - pre difference in skin temperature while controlling for pre condition values
+
+```{r model}
+mtemp <- lmer(abc_temp ~ pre + site*condition + (1|ID), data = delta_temp)
+check_mod_s(mtemp, delta_temp)
+cooks_outliers(mtemp, delta_temp)
+
+
+
+```
+
+Random effects slightly deviates from normality. Residuals are homoskedastic and slightly deviates from normality (negative skew) in factors Nondominantforearm:Exercise. Cooks distance < 1 suggest little influence of deviated data point.
+
+```{r estim}
+
+summary(mtemp, ddf = "Kenward-Roger")
+confint(mtemp)
+
+
+# model anova table, reported 
+an_temp <- anova(mtemp, ddf = "Kenward-Roger")  |>
+  as_tibble() |> 
+  mutate(om2 = as_tibble(F_to_omega2(`F value`, NumDF, DenDF))[1] |> pull()) |> 
+  mutate(interpretation = as_tibble(interpret_omega_squared(om2))[1] |> pull() ) 
+
+an_temp$effects <- rownames(anova(mtemp, ddf = "Kenward-Roger"))
+
+
+
+t_mtemp <- an_temp |> 
+  rowwise() |> 
+  mutate(`Pr(>F)` = pvalue_format_table(`Pr(>F)`)) |> 
+  select(effects, everything())  |> 
+  flextable() |> 
+  set_header_labels(effects = "Effect", `Sum Sq` = "SS", `Mean Sq` = "MS", NumDF ="Df num", DenDF = "Df den", `F value`= "F value", `Pr(>F)` = "p",  om2 = "\u03C9\u00B2\u209A", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Effect","SS", "MS", "Df num", "Df den", "F value", "p", "Effect size" ), colwidths = c(1,1,1,1,1,1,1,2)
+                 ) |> 
+  colformat_double(digits = 3) |> 
+    merge_v(j = c(1,2,3), part = "body") |> 
+  merge_v(part = "header") |>
+  valign(part = "body", valign = "top") |> 
+    bold(part = "header")  |> 
+    autofit() |>  
+  add_footer_lines(values = c("Data from 38 participants. \n Abreviations: SS, Sum of squares; MS, Mean squares; Df, Degrees of freedom"))
+
+t_mtemp
+#print(ts6_alt, preview = "docx")
+
+
+save_as_docx(t_mtemp,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_mtemp.docx")
+
+```
+
+We compute contrasts of marginal means and cohen's d<sub>z</sub> based on t value and ddf.
+
+```{r contrasts}
+
+EMM <- emmeans(mtemp, ~site*condition)
+
+pairs.cond <- pairs(EMM, simple = "condition", adjust = "bonferroni") |> as_tibble()
+pairs.cond.ci <- pairs(EMM, simple = "condition", adjust = "bonferroni") |>
+  confint() |> 
+  as_tibble()
+pairs.cond <- full_join(pairs.cond, pairs.cond.ci)
+
+pairs.s <- pairs(EMM, simple = "site", adjust = "bonferroni") |> as_tibble()
+pairs.s.ci <- pairs(EMM, simple = "site", adjust = "bonferroni") |> confint() |> as_tibble()
+pairs.s <- full_join(pairs.s, pairs.s.ci)
+
+
+pairs_comp <- full_join(
+pairs.cond, pairs.s
+) |> 
+  rowwise() |> 
+  mutate(d = as_tibble(t_to_d(t.ratio, df, paired = T)[1]) |> pull(),
+         interpretation = as_tibble(interpret_cohens_d(t_to_d(t.ratio, df, paired = T)))[5] |> pull())
+
+
+
+t_cont_temp <- pairs_comp %>% 
+    select(site,condition, contrast,  estimate, lower.CL, upper.CL, SE, df, t.ratio, p.value, d, interpretation) %>%
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+           flextable() %>%
+  set_header_labels(site = "Site", condition = "Condition", contrast = "Contrast", estimate = "Difference", lower.CL = "low", upper.CL = "high", SE = "Standard error", df = "Df", t.ratio = "t ratio",p.value = "p", d  = "d~z~", interpretation = "interpretation" ) %>% add_header_row(values = c("Site","Condition", "Contrast","Difference","CI 95 %", "Standard error","Df","t ratio", "p", "Effect size" ), colwidths = c(1,1,1,1,2,1,1,1,1,2)) |> 
+  bold(part = "header") %>%
+  merge_v(part = "header") |> 
+  autofit() %>% 
+  colformat_double( digits = 3) %>% 
+  colformat_md(part = "header", j = 11) |> 
+  fix_border_issues() %>%
+  set_table_properties(layout = "autofit") |> 
+  merge_v(j = c(1,2,3))    |> 
+  hline(i = c(4), border = dash_border) |> 
+  valign(j = c(1,2,3), valign = "top") |> 
+  bg(i = ~ p.value < 0.05 , j = 10, bg = "yellow" ) |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Units: °C. \n Abreviations: CI 95%, 95% confidence interval; Df, Degrees of freedom; dz , Cohen's d for paired samples.")) 
+
+
+t_cont_temp
+
+
+save_as_docx(t_cont_temp,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_cont_temp.docx")
+```
+
+
+Data is visualised: 
+
+```{r temp_viz, fig.dim=c(11,10)}
+
+label <- anova(mtemp, ddf = "Kenward-Roger")  |> 
+  tidy() |> 
+  filter(term == "site:condition") |>
+  mutate(p.value = pvalue_format_plot(p.value)) |> 
+  mutate(interaction = glue("Site x Condition: {p.value}")) |> 
+  pull(interaction)
+
+grob <- grobTree(textGrob(label, x = 0.1, y = 0.95, hjust=0,
+                            gp=gpar(col="black", fontsize=9, fontfamily = "Roboto")))
+
+
+p_delta_temp_points <- delta_temp %>% 
+      mutate(unique_ID = paste(ID, condition)) %>% 
+      mutate(unique_ID = factor(unique_ID)) %>%
+      group_by(unique_ID) %>%
+      arrange(unique_ID) %>% 
+      ggplot() +
+      geom_point(aes(x = site, y = abc_temp, colour = condition ), position = position_jitter(width = 0.05, seed = 123)) +
+      geom_line(aes(y = abc_temp, x = site, group = factor(unique_ID), colour = condition), alpha = 0.3, position = position_jitter(width = 0.05, seed = 123)) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "black") + 
+      scale_color_manual(values = c( "#00468BFF","#ED0000FF")) +
+      labs(title = "Skin temperature: absolute change",
+           subtitle = "Individual values",
+        y = "Tskin<sub>abc</sub> (°C)",
+        x = "",
+        colour = "Condition"
+      )  +
+    my_theme() +
+  theme(legend.position = "none",
+    axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+    axis.line.x = element_blank()
+        ) +
+  guides(colour = guide_legend(override.aes = list(size = 4)))
+  
+
+
+p <- ggplot_build(p_delta_temp_points)
+p$data[[1]] <- p$data[[1]] |> 
+  group_by(group) |> 
+  mutate(x2 = if_else(colour == "#00468BFF", x-0.09, x+0.09)) |> 
+  mutate(x = x2) |> 
+  select(-x2) |> ungroup() 
+
+p$data[[2]] <- p$data[[2]] |> 
+  group_by(group) |> 
+  mutate(x2 = if_else(colour == "#00468BFF", x-0.09, x+0.09)) |> 
+  mutate(x = x2 ) |> 
+  select(-x2) |> ungroup() 
+
+q <- ggplot_gtable(p)
+
+p_delta_temp_points <- as.ggplot(q)
+
+p_delta_temp_mean <- delta_temp_sum |> 
+  mutate(site = factor(site, levels = c(
+    "Dominant forearm",
+    "Non-dominant forearm",
+    "Dominant quadriceps",
+    "Non-dominant quadriceps"
+    ), labels = c(
+    "<span style='color:black'>Dominant forearm</span>",
+    "<span style='color:#925E9FFF'>Non-dominant forearm</span>",
+    "<span style='color:#42B540FF'>Dominant quadriceps</span>",
+    "<span style='color:black'>Non-dominant quadriceps</span>"
+  ))) |> 
+  ggplot(aes(x = site, y = m)) +
+      geom_errorbar(aes( ymin = cil, ymax = cih, group = condition, colour = condition), width = 0.1, position = position_dodge(width=0.2), alpha = 1) +
+      geom_point(aes( colour = condition, group = condition),  position=position_dodge(width=0.2), size = 4) +
+      geom_line(aes(x = site, y = m, colour = condition, group = condition),  position=position_dodge(width=0.2)) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "black") + 
+      scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+      labs(
+        subtitle = "Condition means",
+        y = "Mean Tskin<sub>abc</sub> (°C)",
+        x = "Site",
+        colour = "Condition"
+      )  +
+    my_theme() +
+    theme(legend.position = "none") + 
+  annotation_custom(grob) +
+  showSignificance( 2.3, c(0.2, 1), "*", width = -0.05) +
+    showSignificance( 3.3, c(-0.15, 1.3), "*", width = -0.05) +
+     showSignificance( 4.3, c(-0.2, 1.6), "*", width = -0.05) +
+    showSignificance( c(0.9,2), 1.4,"*", width = -0.05, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( c(0.9,3), 1.8,"*", width = -0.05, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF"))+
+  showSignificance( c(0.9,4), 2.2,"*", width = -0.05, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+    showSignificance( c(1,2.1), -1,"*", width = +0.05, segmentParams = list(col = "#00468BFF"), textParams = list(col = "#00468BFF")) +
+    showSignificance( c(2,3.1), -1.4,"*", width = +0.05, segmentParams = list(col = "#00468BFF"), textParams = list(col = "#00468BFF"))+
+    showSignificance( c(2,4.1), -1.8,"*", width = +0.05, segmentParams = list(col = "#00468BFF"), textParams = list(col = "#00468BFF")) +
+  coord_cartesian(ylim = c(-3,4)) +
+  theme(axis.text.x = element_markdown())
+
+p_delta_temp_mean <- as.ggplot(p_delta_temp_mean)
+
+p_temp <- p_delta_temp_points/p_delta_temp_mean  + plot_layout(guides = "collect") 
+#plot_annotation(tag_levels = 'A')
+
+
+#ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/ptemp.png", plot = p_temp, height = 9, width = 7.5,dpi = 600)
+
+#p_temp
+
+
+
+
+mean_temp_fun <- function(s){
+ 
+pos_temp <- position_dodge(width=0.2)
+  p <- d_temp_sum |> 
+  filter(site == s) |> 
+  ggplot(aes(x = timing, y = m, col = condition, group = condition)) +
+  geom_point(size = 4, position = pos_temp) +
+  geom_line(position = pos_temp) +
+  geom_errorbar(aes(ymin = cil, ymax = cih), position = pos_temp, width = 0.1) +
+  labs(subtitle = s, x = "", y = "Mean Tskin (°C)", colour = "") + 
+  scale_color_manual(values = c("#00468BFF", "#ED0000FF")) +
+  ylim(c(30, 34)) +
+    theme(legend.position = "none") +
+  my_theme()  
+  
+  return(p)
+  
+  
+}
+
+
+ 
+
+l_temp_plots <- lapply(levels(d_temp_sum$site),mean_temp_fun )
+
+pt1 <- (l_temp_plots[[1]]+ scale_x_discrete(breaks = "") + labs(title = "Skin temperature: pre and post") + theme(
+legend.position = c(0.3, 0.8)))
+pt2 <- (l_temp_plots[[2]]+ scale_x_discrete(breaks = "") + theme(plot.subtitle  = element_text(colour = "#925E9FFF")))   
+pt3 <- (l_temp_plots[[3]]+ scale_x_discrete(breaks = "")) + theme(plot.subtitle  = element_text(colour = "#42B540FF"))
+pt4 <- (l_temp_plots[[4]] +labs(x = "Timing")) 
+
+
+p_mean_temp <-( pt1) /( pt2)/ (pt3)/ (pt4) + plot_layout(axis_titles = "collect") 
+
+p_mean_temp <- as.ggplot(p_mean_temp)
+
+# fix plot annotation
+ptemp_all <- (p_mean_temp) + p_temp + plot_annotation(tag_levels = 'A' ) + plot_layout(width = c(1,2), ncol = 2, nrow = 1)& theme(
+  plot.tag = element_text(size = 11, family  = "Roboto", face = "bold")
+  )
+
+ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/fig2_temp.png", plot = ptemp_all, height = 11, width = 9.5,dpi = 600)
+
+ptemp_all
+
+```
+
+
+# EIH models
+
+
+Manipulation checks suggest adequate operationalization of exercise vs control, no carry-over effect, and reliable sensory testing . Differences in skin temperature changes are observed between conditions and testing sites, stressing the importance of including skin temperature as a covariate in EIH models involving thermal test modalities. 
+
+We compute statistical model to investigate the differential impact of exercise across test modalities and sites.
+
+
+## Model: EIH ~ site x test mod
+
+EIH (i.e., (post - pre)<sub>Exercise</sub> (post-pre)<sub>control</sub>) is compared across test modalities and testing sites using a linear mixed model with a random effect on the participant while controlling for baseline values (i.e., (pre<sub>Exercise</sub> - pre<sub>control</sub>)). 
+
+
+```{r d_m_all}
+# data is formatted for the model
+
+dm <- data_long %>%
+  select(-session) |> 
+  filter(test_mod != 'adt') |> # removing ADT data
+    ungroup() |>
+    rowwise() |> # cdt and ppt are log transformed
+    mutate(test_value = if_else(test_mod %in% c("cdt", "ppt"),  logt(test_value), test_value)) |> 
+    ungroup() |> 
+    group_by(test_mod, site) |> 
+    mutate(test_value = scale(test_value)) %>% # values of each test mod and site are standardized 
+    group_by(site) |> 
+    mutate(temp = scale(temp)) |> 
+  pivot_wider(names_from = c(condition, timing), values_from = c(temp, test_value)) |>
+  mutate(
+    eih = (test_value_exp_post - test_value_exp_pre) - (test_value_cont_post - test_value_cont_pre),
+    test_value_pre = test_value_exp_pre - test_value_cont_pre,
+    delta_temp = (temp_exp_post - temp_exp_pre) - (temp_cont_post - temp_cont_pre)
+  ) |> 
+  select(ID, test_mod, site, order, eih, test_value_pre, delta_temp) |> 
+  mutate(test_mod = factor(test_mod, levels = c("ppt", "pp","hpt", "cdt"), labels = c("PPT", "PP", "HPT", "CDT")),
+           site = factor(site, levels = c("forearm", "quad"), labels = c("Forearm", "Quadriceps"))) 
+
+
+
+
+
+
+  
+```
+
+
+
+
+```{r m_all}
+
+
+# empty mod
+#empty_mod <-  lmer(eih ~ 1 + (1|ID), data = dm)
+#empty.mod(empty_mod)
+
+
+
+# model reduced vs with temp
+m0 <- lmer(eih ~ test_value_pre + test_mod*site + (1|ID), data = dm ) # reduced
+
+
+check_mod(m0, dm)
+#check_model_ac(m0, dm)
+cooks_outliers(m0, dm)
+
+
+```
+
+Random effects are normally distributed. Overall, residuals are homoskedastic and normally distributed. A slight deviation from normality for forearm:pp residuals. No outlier is detected. 
+
+We compute a second model including the skin temperature (defined as absolute change of skin temperature at each site across interventions (post - pre)<sub>Exercise</sub> - (post - pre)<sub>control</sub>).
+
+```{r m_all_temp}
+m1 <- lmer(eih ~ test_value_pre + delta_temp + test_mod*site + (1|ID), data = dm) # + temp
+check_mod(m1, dm)
+
+
+```
+
+Assumptions checks are similar in both models. The model are compared using LRT.
+
+```{r}
+print(anova(m1, m0))
+```
+
+We estimate the reduced model. 
+
+```{r m_all_estim}
+# summary table, not reported
+
+ci_m0 <- rownames_to_column(as.data.frame(confint(m0, oldNames = F)), var = "term") %>% 
+  as_tibble() |> 
+  rename("CI_low" = `2.5 %`) |> 
+  rename("CI_high" = `97.5 %`)  |> 
+  mutate(term = str_replace_all(term, "sd_\\(Intercept\\)\\|ID", "sd__(Intercept)")) |> 
+  mutate(term = str_replace(term, "sigma", "sd__Observation"))
+  
+  
+df_m0 <- m0 |> 
+  tidy(ddf = "Kenward-Roger") |> 
+  rename("p" = "p.value") |> 
+  rename("t" = "statistic") |> 
+  mutate(effect = str_replace_all(effect, "ran_pars", "random")) 
+
+
+ts6 <-  full_join(df_m0, ci_m0) %>%  # model summary table
+  as_tibble() |> 
+  filter(effect != "NA") |> 
+  select(effect,  term, estimate, std.error, CI_low, CI_high, t, df, p) |> 
+  flextable() %>%
+  bold(part = "header", bold = TRUE) %>%
+  set_header_labels( effect = "Effect", term = "Term", estimate = "Estimate", std.error = "Standard error", CI_low = "low", CI_high = "high",  t = "t value", df = "Df", p = "p") |> 
+  add_header_row(
+    values = c( "Effect",  "Term","Estimate","Standard error", "CI 95%", "t value", "Df", "p"),
+    colwidths = c(1, 1, 1, 1, 2, 1,1,1)
+  ) %>%
+  merge_h(part = "header") %>%
+  merge_v(part = "header") %>%
+  align(align = "center", part = "header") %>%
+  merge_v(part = "body") |> 
+  valign(j = 1, valign = "top") |> 
+  colformat_double(digits = 3) %>% 
+  autofit() %>%
+  fix_border_issues() %>%
+  add_footer_lines(values = c(
+    "CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Pinprick rating; PPT, Pressure pain threshold"
+  )) %>%
+    set_table_properties(layout = "autofit")
+#print(ts6, preview = "docx")
+
+ # model anova table, reported 
+df_an <- anova(m0, ddf = "Kenward-Roger")  |>
+  as_tibble() |> 
+  mutate(om2 = as_tibble(F_to_omega2(`F value`, NumDF, DenDF))[1] |> pull()) |> 
+  mutate(interpretation = as_tibble(interpret_omega_squared(om2))[1] |> pull() ) 
+
+df_an$effects <- rownames(anova(m0, ddf = "Kenward-Roger"))
+
+ts6_alt <- df_an |> 
+  rowwise() |> 
+  mutate(`Pr(>F)` = pvalue_format_table(`Pr(>F)`)) |> 
+  select(effects, everything())  |> 
+  flextable() |> 
+  set_header_labels(effects = "Effect", `Sum Sq` = "SS", `Mean Sq` = "MS", NumDF ="Df num", DenDF = "Df den", `F value`= "F value", `Pr(>F)` = "p",  om2 = "\u03C9\u00B2\u209A", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Effect","SS", "MS", "Df num", "Df den", "F value", "p", "Effect size" ), colwidths = c(1,1,1,1,1,1,1,2)
+                 ) |> 
+  colformat_double(digits = 3) |> 
+    merge_v(j = c(1,2,3), part = "body") |> 
+  merge_v(part = "header") |>
+  valign(part = "body", valign = "top") |> 
+    bold(part = "header")  |> 
+  bg(i = ~ `Pr(>F)`<0.05, j = 7, bg = "yellow") |> 
+    autofit() |>  
+  add_footer_lines(values = c("Data from 38 participants. \n Abreviations: SS, Sum of squares; MS, Mean squares; Df, Degrees of freedom."))
+ts6
+ts6_alt
+#print(ts6_alt, preview = "docx")
+
+
+save_as_docx(ts6_alt,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_m.all_anova.docx")
+
+```
+
+### Contrasts model site:test mod
+
+We compute simple pairwise comparisons of the significant test modality:site interaction with bonferroni correction. 
+
+
+```{r m_all_contrasts}
+
+EMM <- emmeans(m0, ~ test_mod*site)
+
+pairs.tm <- pairs(EMM, simple = "test_mod", adjust = "holm") |> as_tibble()
+pairs.tm.ci <- pairs(EMM, simple = "test_mod", adjust = "holm") |>
+  confint() |> 
+  as_tibble()
+pairs.tm <- full_join(pairs.tm, pairs.tm.ci)
+
+pairs.s <- pairs(EMM, simple = "site", adjust = "holm") |> as_tibble()
+pairs.s.ci <- pairs(EMM, simple = "site", adjust = "holm") |> confint() |> as_tibble()
+pairs.s <- full_join(pairs.s, pairs.s.ci)
+
+
+pairs_comp <- full_join(
+pairs.tm, pairs.s
+) |> 
+  rowwise() |> 
+  mutate(d = as_tibble(t_to_d(t.ratio, df, paired = T)[1]) |> pull(),
+         interpretation = as_tibble(interpret_cohens_d(t_to_d(t.ratio, df, paired = T)))[5] |> pull())
+
+
+
+ts7 <- pairs_comp %>% 
+    select(site, test_mod, contrast,  estimate, lower.CL, upper.CL, SE, df, t.ratio, p.value, d, interpretation) %>%
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+           flextable() %>%
+  set_header_labels(site = "Site", test_mod = "Test modalities", contrast = "Contrast", estimate = "Difference", lower.CL = "low", upper.CL = "high", SE = "Standard error", df = "Df", t.ratio = "t ratio",p.value = "p", d  = "d~z~", interpretation = "interpretation" ) %>% add_header_row(values = c("Site","Test modalities", "Contrast","Difference","CI 95 %", "Standard error","Df","t ratio", "p", "Effect size" ), colwidths = c(1,1,1,1,2,1,1,1,1,2)) |> 
+  bold(part = "header") %>%
+  merge_v(part = "header") |> 
+  autofit() %>% 
+  colformat_double( digits = 3) %>% 
+  colformat_md(part = "header", j = 11) |> 
+  fix_border_issues() %>%
+  set_table_properties(layout = "autofit") |> 
+  merge_v(j = c(1,3))    |> 
+  valign(j = 1, valign = "top") |> 
+  bg(i = ~p.value < 0.05, j = 10, bg = "yellow") |> 
+  hline(i = c(6, 12), border = dash_border) |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Units: PPT, log; CDT, log; HPT, °C; PP, VAS 100 - 0. \n Abreviations: PPT, Pressure pain threshold; CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Mechanical pinprick rating; CI 95%, 95% confidence interval; Df, Degrees of freedom; dz , Cohen's d for paired samples.")) 
+
+
+ts7
+
+#print(ts7, preview = "docx")
+save_as_docx(ts7,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_m.all_contrasts.docx")
+
+```
+
+
+### Plot model site: test mod
+
+Data are plotted and results from the model are displayed.
+
+```{r model_all_viz, fig.height=9, fig.width=7.5, out.width="100%"}
+
+
+
+txt_gain <- text_grob(label = "Increased sensitivity", size = 9,rot = 90, color = "grey")
+txt_loss <- text_grob(label = "Reduced sensitivity", size = 9,rot = 90, color = "grey")
+
+df_label <- anova(m0, ddf = "Kenward-Roger")  |> # replaced m0
+    tidy() |> 
+  rowwise() |> 
+ mutate(p.value = pvalue_format_plot(p.value))
+
+
+
+label <- df_label |> 
+  filter(term == "test_mod:site") |> 
+    mutate(interaction = glue("Test modality x Site: {p.value}")) |> 
+    pull(interaction)
+
+
+    grob <- grobTree(textGrob(label, x = 0.1, y = 0.85, hjust=0,
+                            gp=gpar(col="black", fontsize=9, fontfamily = "Roboto")))
+    
+data.mod.summary <- dm %>%
+        group_by(ID, site, test_mod) %>% 
+      mutate(eih = mean(eih)) %>% 
+      slice(1) %>% 
+  ungroup() |> 
+      group_by(test_mod, site) %>% 
+      summarize(m = mean(eih),
+                sd = sd(eih),
+                cil = ci_low(eih),
+                cih = ci_high(eih)
+    ) %>%
+      mutate(unique_site = paste(test_mod, site)) %>% arrange(unique_site)
+
+pos3 <- position_jitter(width = 0.05, seed = 123)
+
+
+p.mod.all.points <- dm %>% 
+     group_by(ID, site, test_mod) %>% 
+      mutate(eih = mean(eih)) %>% 
+      slice(1) %>%
+  ungroup() |> 
+      mutate(unique_ID = paste(ID, site)) %>% 
+      mutate(unique_ID = factor(unique_ID)) %>%
+      ggplot() +
+      geom_point(aes(x = test_mod, y = eih, colour = site, group = factor(unique_ID)),position = pos3) +
+      geom_line(aes(y = eih, x = test_mod, group = factor(unique_ID), colour = site) ,position = pos3, alpha = 0.3) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "black") + 
+      scale_color_manual(values = c("#925E9FFF", "#42B540FF")) +
+      labs(#title = "LMM predicted values",
+        #subtitle = "EIH ~ Baseline + Test modality * Site",
+        y = "Individual mean EIH (standardized units)",
+        x = "",
+        colour = "Site"
+      )  +
+    my_theme() +
+        annotation_custom(txt_gain, ymin  = -1.5, ymax = -2, xmin = 0.3, xmax = 0.7) +
+   annotation_custom(txt_loss, ymin  = 1.5, ymax = 2, xmin = 0.3, xmax = 0.7) +
+  theme(legend.position = "top",
+    axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+    axis.line.x = element_blank()
+        ) + coord_cartesian(ylim = c(-3,4)) +
+  guides(colour = guide_legend(override.aes = list(size = 4)))
+
+p <- ggplot_build(p.mod.all.points)
+p$data[[1]] <- p$data[[1]] |> 
+  group_by(group) |> 
+  mutate(x2 = if_else(colour == "#925E9FFF", x-0.09, x+0.09)) |> 
+  mutate(x = x2) |> 
+  select(-x2) |> ungroup() 
+
+p$data[[2]] <- p$data[[2]] |> 
+  group_by(group) |> 
+  mutate(x2 = if_else(colour == "#925E9FFF", x-0.09, x+0.09)) |> 
+  mutate(x = x2 ) |> 
+  select(-x2) |> ungroup() 
+
+q <- ggplot_gtable(p)
+p.mod.all.points <- as.ggplot(q)
+
+
+
+p.mod.all.means <- ggplot() +
+      geom_errorbar(data =data.mod.summary, aes(x = test_mod, y = m, ymin = cil, ymax = cih, group = site, colour = site), width = 0.1, position = position_dodge(width=0.2), alpha = 1) +
+      geom_point(data = data.mod.summary, aes(x = test_mod, y = m, colour = site, group = site),  position=position_dodge(width=0.2), size = 4) +
+      geom_line(data = data.mod.summary ,aes(x = test_mod, y = m, colour = site, group = site),  position=position_dodge(width=0.2)) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "black") + 
+       scale_color_manual(values = c("#925E9FFF", "#42B540FF")) +
+      labs(#title = "LMM predicted values",
+        #subtitle = "EIH ~ Baseline + Test modality * Site",
+        y = "Condition mean EIH (standardized units)",
+        x = "Test modality",
+        colour = "Site"
+      )  +
+    my_theme() +
+    theme(legend.position = "none") +
+      annotation_custom(txt_gain, ymin  = -1, ymax = -0.5, xmin = 0.3, xmax = 0.7) +
+   annotation_custom(txt_loss, ymin  = 0.5, ymax = 1, xmin = 0.3, xmax = 0.7) +
+  annotation_custom(grob)+
+  coord_cartesian(ylim = c(-1.5,1.5)) +
+     showSignificance( 0.8,c(-0.18, 0.47) , "*", width = +0.05) +
+     showSignificance( 4.2, c(-0.55, 0.23), "*", width = -0.05) +
+     showSignificance( c(1,3.1), 0.45 + 0.6,"*", width = -0.05,textParams = list(col = "#42B540FF"), segmentParams = list(col = "#42B540FF") ) +
+     showSignificance( c(1,4.1), 0.45 + 0.3,"*", width = -0.05,textParams = list(col = "#42B540FF"), segmentParams = list(col = "#42B540FF")) 
+
+p.mod.all.means <- as.ggplot(p.mod.all.means)
+
+
+p.mod.all <-p.mod.all.points/p.mod.all.means + plot_annotation(tag_levels = 'A') + plot_layout(guides = "collect") & theme(
+  legend.position = "top", 
+  plot.tag = element_text(size = 11, family  = "Roboto", face = "bold")
+  )
+
+
+
+ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/fig3_modall.png", plot = p.mod.all, height = 9, width = 7.5,dpi = 600)
+
+p.mod.all
+```
+
+
+
+## Model: absolute change ~ site x condition
+
+```{r d_m_abc}
+
+d_abc <- data_long |> 
+  select(-session) |> 
+  filter(test_mod != 'adt') |> # removing ADT data
+    ungroup() |>
+    rowwise() |> # cdt and ppt are log transformed
+    mutate(test_value = if_else(test_mod %in% c("cdt", "ppt"),  logt(test_value), test_value)) |> 
+    ungroup() |> 
+    group_by(test_mod, site) |> 
+    mutate(test_value = scale(test_value)) %>% # values of each test mod and site are standardized 
+    group_by(site) |> 
+    mutate(temp = scale(temp)) |> 
+  pivot_wider(names_from = timing, values_from = c(test_value, temp)) |> 
+  mutate(
+    abc = test_value_post - test_value_pre,
+    pre = test_value_pre,
+    abc_temp = temp_post - temp_pre
+  ) |> 
+  select(ID, order, condition, site, test_mod, abc, pre, abc_temp) 
+
+#. function to filter for each test modality
+d.mod.s <- function(tm){
+  d_abc |> filter(test_mod == tm) |> 
+    mutate(
+      site = factor(site, levels = c("forearm", "quad")),
+      condition = factor(condition, levels = c("cont", "exp"))
+    )
+}
+
+```
+
+
+
+### PPT
+
+
+```{r m_ppt}
+dm.ppt <- d.mod.s("ppt") # data set with absolute change
+
+m.0.ppt <- lmer(abc ~ pre + condition*site + (1|ID), data = dm.ppt, REML = T)
+check_mod_s(m.0.ppt, dm.ppt)
+cooks_outliers(m.0.ppt, dm.ppt)
+
+
+```
+
+Random effects are roughly normally distributed. Residuals are homoskedastic and normally distributed, except for quadriceps:exp. No outlier is detected (cooks distance < 1).
+
+```{r ppt_estim}
+
+print(summary(m.0.ppt, ddf = "Kenward-Roger"))
+
+an_ppt <- anova(m.0.ppt, ddf = "Kenward-Roger") |> tidy()
+an_ppt$test_mod <- rep("PPT", nrow(an_ppt))
+an_ppt |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+
+
+
+
+
+
+```
+
+### CDT
+
+```{r m_cdt}
+dm.cdt <- d.mod.s("cdt") # data set with absolute change
+
+m.0.cdt <- lmer(abc ~ pre + condition*site + (1|ID), data = dm.cdt, REML = T)
+
+check_mod_s(m.0.cdt, dm.cdt)
+#check_model_ac(m.0.cdt, dm.cdt)
+cooks_outliers(m.0.cdt, dm.cdt)
+```
+Random effects are roughly normally distributed. Residuals are homoskedastic and normally distributed---except for forearm:exp and quad:exp where a slight positive skew is observed. All coods distance < 1: no outlier is detected.
+
+We compute a second model including the skin temperature (defined as absolute change of skin temperature at each site across interventions (post - pre)<sub>condition</sub> ).
+
+```{r m_cdt_temp}
+m.1.cdt <- lmer(abc ~ pre + abc_temp + condition*site + (1|ID), data = dm.cdt, REML = T)
+check_mod_s(m.1.cdt, dm.cdt)
+cooks_outliers(m.1.cdt, dm.cdt)
+```
+
+Distributional assumptions are similar to model without skin temperature absolute change (see above).
+
+```{r}
+print(anova(m.0.cdt, m.1.cdt))
+```
+
+We choose the reduced model. 
+
+```{r m_cdt_estim}
+print(summary(m.0.cdt, ddf = "Kenward-Roger"))
+an_cdt <- anova(m.0.cdt, ddf = "Kenward-Roger") |> tidy()
+an_cdt$test_mod <- rep("CDT", nrow(an_cdt))
+an_cdt |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+```
+
+
+### HPT
+
+```{r m_hpt}
+dm.hpt <- d.mod.s("hpt") # data set with absolute change
+
+m.0.hpt <- lmer(abc ~ pre + condition*site + (1|ID), data = dm.hpt, REML = T)
+check_mod_s(m.0.hpt, dm.hpt)
+cooks_outliers(m.0.hpt, dm.hpt)
+```
+
+Random effects are roughly normally distributed. Residuals are homoskedastic and appear negatively skewed for all site:condition levels. No outlier is detected. 
+
+
+We compute a second model including the skin temperature (defined as absolute change of skin temperature at each site across interventions (post - pre)<sub>condition</sub> )
+
+
+```{r m_hpt_temp}
+m.1.hpt <- lmer(abc ~ pre + abc_temp + condition*site + (1|ID), data = dm.hpt, REML = T)
+check_mod_s(m.1.hpt, dm.hpt)
+
+cooks_outliers(m.1.hpt, dm.hpt)
+```
+
+Distributional assumptions are similar to model without skin temperature absolute change (see above).
+
+```{r}
+print(anova(m.0.hpt, m.1.hpt))
+```
+
+We choose the model including skin temperature model. 
+
+```{r m_hpt_estim}
+print(summary(m.1.hpt, ddf = "Kenward-Roger"))
+an_hpt <- anova(m.1.hpt, ddf = "Kenward-Roger") |> tidy()
+an_hpt$test_mod <- rep("HPT", nrow(an_hpt))
+an_hpt |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+```
+
+### PP
+
+```{r m_pp}
+dm.pp <- d.mod.s("pp") # data set with absolute change
+
+m.0.pp <- lmer(abc ~ pre + condition*site + (1|ID), data = dm.pp, REML = T)
+check_mod_s(m.0.pp, dm.pp)
+#check_model_ac(m.0.pp, dm.pp)
+cooks_outliers(m.0.pp, dm.pp)
+
+
+```
+
+Random effects are roughly normally distributed. Residuals are homoskedastic and follow a normal distribution with fat tails. No outlier is detected (cooks distance < 1).
+
+```{r pp_estim}
+
+print(summary(m.0.pp, ddf = "Kenward-Roger"))
+
+an_pp <- anova(m.0.pp, ddf = "Kenward-Roger") |> tidy()
+an_pp$test_mod <- rep("PP", nrow(an_pp))
+an_pp |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+
+
+
+
+
+```
+
+
+### Table models condition:site
+
+F tests and p values on fixed and interactions effects of models are collated in a table.
+
+
+
+```{r}
+an_mcs <- rbind(an_ppt, an_cdt, an_hpt, an_pp) |>
+  select(test_mod, everything()) |> 
+  rowwise() |> 
+    mutate(om2 = as_tibble(F_to_omega2(statistic, NumDF, DenDF))[1] |> pull()) |> 
+  mutate(interpretation = as_tibble(interpret_omega_squared(om2))[1] |> pull() ) |> 
+  mutate(test_mod = factor(test_mod, levels = c("CDT", "HPT", "PP", "PPT")))
+
+
+t_models_cs <- an_mcs |> 
+  select(test_mod, term, sumsq, meansq, NumDF, DenDF, statistic, p.value, om2, interpretation) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  flextable() |> 
+  set_header_labels( test_mod = "Test modalities",  term = "Effect", sumsq = "SS", meansq = "MS", NumDF ="Df num", DenDF = "Df den", statistic= "F value", p.value = "p",  om2 = "\u03C9\u00B2\u209A", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Test modalities", "Effect","SS", "MS", "Df num", "Df den", "F value", "p", "Effect size" ), colwidths = c(1,1,1,1,1,1,1,1,2)
+                 ) |> colformat_double(digits = 3) |> 
+    merge_v(j = c(1,2), part = "body") |> 
+  merge_v(part = "header") |>
+  valign(part = "body", valign = "top") |> 
+    bold(part = "header")  |> 
+  bg(i = ~p.value < 0.05, j = 8, bg = "yellow") |> 
+    autofit() |> 
+     hline(i = c(4, 8, 13), border = dash_border)  |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Units: PPT, log; CDT, log; HPT, °C; PP, VAS 100 - 0; ADT, mA. \n Abreviations: PPT, Pressure pain threshold; CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Mechanical pinprick rating;  SS, Sum of squares; MS, Mean squares; Df, Degrees of freedom"))
+  
+#print(t_models_pp, preview = "docx")
+
+t_models_cs
+ 
+save_as_docx(t_models_cs,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_models_cs.docx")
+```
+
+
+### Pairwise comparisons models condition:site
+
+Pairswise comparisons of significant main effects or interactions are computed. 
+
+```{r}
+
+
+fun_emm_cs <- function(mod, tm.name){
+  emm <- emmeans(mod, ~site*condition)
+  pairs.s <- pairs(emm, simple = "site", adjust = "holm") |>  as_tibble()
+  pairs.s.ci <- pairs(emm, simple = "site", adjust = "holm") |> 
+    confint() |> as_tibble()
+  pairs.s.full <- full_join(pairs.s, pairs.s.ci)
+  
+    pairs.c <- pairs(emm, simple = "condition", adjust = "holm") |>  as_tibble()
+  pairs.c.ci <- pairs(emm, simple = "condition", adjust = "holm") |> 
+    confint() |> as_tibble()
+  pairs.c.full <- full_join(pairs.c, pairs.c.ci)
+  
+  pairs <- full_join(pairs.s.full, pairs.c.full) |> 
+    select(condition, site, contrast, estimate, lower.CL, upper.CL, everything())
+  pairs$var <- rep(tm.name, nrow(pairs))
+  return(pairs)
+  
+} # function for pairwise comparisons of significant interactions
+
+pairs.ppt <- fun_emm_cs(m.0.ppt, "PPT")
+pairs.cdt <- fun_emm_cs(m.0.cdt, "CDT")
+
+
+
+
+
+df_cont_mcs <- rbind(pairs.ppt, pairs.cdt)  |> 
+  rename(test_mod = var)
+
+#df_cont_mpp$p.corr <- p.adjust(df_cont_mpp$p.value, method = "BH" )
+
+ts_mcs_contrasts <- df_cont_mcs |> 
+    rowwise() |> 
+  mutate(d = as_tibble(t_to_d(t.ratio, df, paired = T)[1]) |> pull(),
+         interpretation = as_tibble(interpret_cohens_d(t_to_d(t.ratio, df, paired = T)))[5] |> pull()) |> 
+  select(test_mod, site, condition,contrast, estimate, lower.CL, upper.CL, everything()) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  mutate(test_mod = factor(test_mod, levels = c("CDT", "HPT", "PP", "PPT"))) |> 
+  arrange(test_mod) |> 
+  flextable() |> 
+  set_header_labels(test_mod = "Test modalities", site = "Site", condition = "Condition", contrast = "Contrast", estimate = "Difference", lower.CL = "low", upper.CL = "high", SE = "SE", df = "Df", t.ratio = "t value", p.value = "p", d = "d~z~", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Test modalities", "Site","Condition","Contrast","Difference","CI", "SE", "Df", "t value",  "p", "Effect size" ), colwidths = c(1,1,1,1,1,2,1,1,1,1,2)
+                 ) |> 
+  colformat_double(digits = 3) |> 
+  colformat_md(part = "header", j = 12) |> 
+  merge_v(part = "header") |> 
+  merge_v(j = 1) |> 
+  valign(part = "body", valign = "top") |> 
+    bold(part = "header")  |> 
+  hline(i = 4, border  = dash_border) |> 
+  bg(i = ~p.value < 0.05, j = 11, bg = "yellow") |> 
+    autofit() |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Units: PPT, log; CDT, log; HPT, °C. \n Abreviations: PPT, Pressure pain threshold; CDT, Cold detection threshold; HPT, Heat pain threshold; SE, Standard error; CI 95%, 95% confidence interval; Df, Degrees of freedom; dz, Cohen's d for paired samples. "))
+
+#print(ts_mpp_contrasts, preview = "docx")
+ts_mcs_contrasts
+
+save_as_docx(ts_mcs_contrasts,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/ts_mcs_contrasts.docx")
+```
+
+### Plot  models condtion:site
+
+
+
+```{r, fig.width = 10.5, fig.height=12}
+pppt.points <- plot_eih_s(dm.ppt, t = "Pressure pain threshold", u = "Log", mod = m.0.ppt, x = F)[[2]]
+
+pppt.means <- plot_eih_s(dm.ppt, t = "Pressure pain threshold", u = "Log", mod = m.0.ppt, x = F, y_axis = F)[[3]]+
+   showSignificance( 2.2, c(-0.25, 0.25), "*", width = -0.05) +
+  showSignificance( c(1.05,2.1), 0.4, "*", width = -0.05, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) + showSignificance( c(0.9,1.95), -0.4, "*", width = 0.05, segmentParams = list(col = "#00468BFF"), textParams = list(col = "#00468BFF"))  + theme(legend.position = "none")
+  
+
+pcdt.points <-  plot_eih_s(dm.cdt, t = "Cold detection threshold", u = "Log", mod = m.0.cdt, x = T)[[2]]
+pcdt.means <- plot_eih_s(dm.cdt, t = "Cold detection threshold", u = "Log", mod = m.0.cdt,x = T, y_axis = F)[[3]] + showSignificance( 2.2, c(-0.4, 0.25), "*", width = -0.05) +
+  showSignificance( c(1.05,2.1), -0.6, "*", width = 0.05, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF"))+ theme(legend.position = "none")
+
+phpt.points <-  plot_eih_s(dm.hpt, t = "Heat pain threshold", u = "°C", mod = m.0.hpt)[[2]]
+phpt.means <- plot_eih_s(dm.hpt, t = "Heat pain threshold", u = "°C", mod = m.0.hpt, y_axis = F)[[3]]+ theme(legend.position = "none")
+
+
+ppp.points <- plot_eih_s(dm.pp, t = "Pinprick rating", u = "VAS 0 - 100", mod = m.0.pp)[[2]]
+ppp.means <- plot_eih_s(dm.pp, t = "Pinprick rating", u = "VAS 0 - 100", mod = m.0.pp, y_axis = F)[[3]]+ theme(legend.position = "none")
+
+p_mcs <- (pppt.points + pppt.means) / (ppp.points + ppp.means) / (phpt.points + phpt.means) / (pcdt.points + pcdt.means) +
+#  plot_layout(ncol = 3, nrow = 4,  byrow = T, guides = "collect") + 
+  plot_annotation(tag_levels = 'A') &
+  theme(
+    #  legend.position = "bottom", 
+  plot.tag = element_text(size = 11, family  = "Roboto", face = "bold")
+  )
+
+
+ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/fig4_mcs.png", plot = p_mcs , dpi = 600, height = 12, width = 10)
+
+p_mcs
+```
+
+## Models value ~ timing * condition | test modality:site
+
+The effects of timing  condition on sensory test values are investigated in each test modaltiy:site where a significant of condition was found, and in ADT, using linear mixed model with a random intercept on the participant. 
+
+### PPT
+
+#### Quadriceps
+
+```{r}
+# input: test modality and site
+# output: data set formatted to be used by a lme : test_value ~ condition*timing + (1|ID)
+# output data set is in long format and contains all covariables centered and reduced.
+d.mod.tms <- function(test_mod, site){
+  # function that formats data to use in a lme, filtering by site and test modality
+  # modular output for data accoding to condition or fully prep for lme
+  
+ 
+  tm <- toupper(as.character(test_mod))
+  s <- switch(site, "forearm" = "Forearm", "quad" = "Quadriceps", "nosite" = "No site")
+  
+  ## data
+  d.mod <- data_long %>%
+    select(ID, order, test_mod, site, timing, condition, temp, test_value) |> 
+    mutate(test_mod = factor(test_mod, levels = c("cdt", "hpt", "adt","pp", "ppt"), labels = c("CDT", "HPT", "ADT","PP", "PPT")),
+           site = factor(site, levels = c("forearm", "quad", "nosite"), labels = c("Forearm", "Quadriceps", "No site"))) 
+  
+  if(tm == "ADT"){
+    d.test <- d.mod |> filter(test_mod == "ADT")
+    
+  } else {
+    
+    d.test <- d.mod |> 
+      filter(test_mod ==tm, site == s) |> 
+      ungroup() |> 
+      mutate(temp = scale(temp)) |> 
+      ungroup() |> 
+      mutate(timing = factor(timing, levels = c("pre", "post")),
+             condition = factor(condition, levels = c("cont", "exp")),
+             order = factor(order))
+    
+  }
+  
+  
+  
+  
+  return(d.test)
+  
+  
+  
+}
+```
+
+
+```{r ppt_quad}
+
+dm.ppt.quad <- d.mod.tms("ppt","quad")  |>
+  rowwise() |> 
+  mutate(test_value = logt(test_value)) 
+
+#dm.ppt.quad |> 
+ # ggplot(aes(x = timing, y = test_value, col = condition)) +
+ # geom_boxplot() +
+ # facet_grid(cols = vars(condition))
+
+
+m.0.pptquad <- lmer(test_value ~  timing*condition + (1|ID), data = dm.ppt.quad, REML = T)
+
+cooks_outliers( m.0.pptquad, dm.ppt.quad)
+
+check_mod_tms(m.0.pptquad, dm.ppt.quad)
+
+
+```
+
+
+Random effects are normally distributed. Residuals are homoskedastics and normally distributed, a slight deviation is observed for post exp (negative skew). No outlier is detected. Cooks distance < 1 suggest little influence of deviated data point. We keep the model. 
+
+```{r ppt_quad_estim}
+
+
+an_pptq <- anova(m.0.pptquad, ddf = "Kenward-Roger") |> tidy()
+an_pptq$site <- rep("Quadriceps", 3)
+an_pptq$test_mod <- rep("PPT", 3)
+an_pptq |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+
+
+#plot_prepost(dm.ppt.quad , "PPT",  "PPT<sub>log</sub> quadriceps ", m.0.pptquad) 
+
+```
+
+
+
+### CDT
+
+#### Quadriceps
+
+```{r cdt_quad_all_data}
+dm.cdt.quad <- d.mod.tms("cdt","quad") |> 
+  rowwise() |> 
+  mutate(test_value = logt(test_value))
+
+m.0.cdtquad <- lmer(test_value ~ timing*condition + (1|ID), data = dm.cdt.quad)
+check_mod_tms(m.0.cdtquad, dm.cdt.quad)
+
+
+
+```
+
+An outlier is detected and removed.
+
+```{r cdt_quad_noout}
+dm.cdt.quad.noout <- cooks_outliers( m.0.cdtquad, dm.cdt.quad)
+
+m.0.cdtquad.noout <- lmer(test_value  ~ timing*condition + (1|ID), data = dm.cdt.quad.noout)
+
+check_mod_tms(m.0.cdtquad.noout, dm.cdt.quad.noout)
+
+
+```
+
+
+Random effects are not fully normal (positvie skew). Residuals are homoskedastics and normal. No further outlier is detected. Data was log transformed according to standard procedure. We decide to keep the model as it is. 
+
+
+```{r cdt_quad_estim}
+
+an_cdtq <- anova(m.0.cdtquad.noout, ddf = "Kenward-Roger") |> tidy()
+an_cdtq$site <- rep("Quadriceps",nrow(an_cdtq))
+an_cdtq$test_mod <- rep("CDT", nrow(an_cdtq))
+
+an_cdtq  |>  
+  kbl(digits = 3) |> 
+  kable_minimal()
+
+#plot_prepost(dm.cdt.quad.noout, "CDT",  "CDT<sub>log</sub> quadriceps (|\u0394T|)", m.1.cdtquad.noout) 
+
+
+```
+
+
+
+
+### ADT
+
+
+```{r adt}
+dm.adt <- d.mod.tms("adt","no site")  |> 
+  mutate(condition = factor(condition, levels = c("cont", "exp"))) |> 
+  select(!temp,  -site) 
+
+
+m.0.adt <- lmer(test_value  ~ timing*condition + (1|ID), data = dm.adt)
+cooks_outliers(m.0.adt, dm.adt)
+
+
+check_mod_tms(m.0.adt, na.omit(dm.adt) )
+
+
+
+```
+
+Random effects are not normally distributed. Residuals are homoskedastic and appear normal with fat tails. Extreme values appear dispaly cooks distance < 1 suggesting little impact of models output. 
+
+We apply a log transformation. 
+
+```{r adt_log}
+dm.adt.log <- d.mod.tms("adt","no site")  |> 
+  mutate(condition = factor(condition, levels = c("cont", "exp"))) |> 
+  select(!temp, -site)  |> 
+  rowwise() |> 
+  mutate(test_value = logt(test_value))
+
+m.0.adt.log <- lmer(test_value  ~ timing*condition + (1|ID), data = dm.adt.log)
+cooks_outliers(m.0.adt.log, dm.adt.log)
+
+
+check_mod_tms(m.0.adt.log, na.omit(dm.adt.log) )
+```
+
+No impact of log transformation is observed on the distribution of random effects. We decide to estimate the model with orignial units. 
+
+```{r adt_estim}
+
+
+an_adt <- anova(m.0.adt, ddf = "Kenward-Roger") |> tidy()
+an_adt$site <- rep("No site", nrow(an_adt))
+an_adt$test_mod <- rep("ADT", nrow(an_adt))
+
+an_adt |> 
+  kbl(digits = 3) |> 
+  kable_minimal()
+
+
+#plot_prepost(dm.adt, "ADT",  "ADT (mA)", m.0.adt)
+
+
+```
+
+
+### Table models timing:condition
+
+```{r t_models}
+
+an_mpp <- rbind(an_pptq,  an_cdtq, an_adt) |>
+  select(test_mod, site, everything()) |> 
+  rowwise() |> 
+    mutate(om2 = as_tibble(F_to_omega2(statistic, NumDF, DenDF))[1] |> pull()) |> 
+  mutate(interpretation = as_tibble(interpret_omega_squared(om2))[1] |> pull() ) |> 
+  mutate(var2 = glue("{test_mod}_{site}"))
+
+
+
+t_models_pp <- an_mpp |> 
+  select(test_mod, site, term, sumsq, meansq, NumDF, DenDF, statistic, p.value, om2, interpretation) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value))|> 
+  flextable() |> 
+  set_header_labels( test_mod = "Test modalities", site = "Site", term = "Effect", sumsq = "SS", meansq = "MS", NumDF ="Df num", DenDF = "Df den", statistic= "F value", p.value = "p",  om2 = "\u03C9\u00B2\u209A", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Test modalities", "Site","Effect","SS", "MS", "Df num", "Df den", "F value", "p", "Effect size" ), colwidths = c(1,1,1,1,1,1,1,1,1,2)
+                 ) |> colformat_double(digits = 3) |> 
+   hline(i = c(3, 6), border = dash_border)  |> 
+    merge_v(j = c(1,2,3), part = "body") |> 
+  merge_v(part = "header") |>
+  valign(part = "body", valign = "top") |> 
+    bold(part = "header")  |> 
+    autofit() |> 
+  bg(i = ~p.value < 0.05, j = 9, bg = "yellow") |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Units: PPT, log; CDT, log; ADT, mA. \n Abreviations: PPT, Pressure pain threshold; CDT, Cold detection threshold; ADT, Auditory detection threshold; SS, Sum of squares; MS, Mean squares; Df, Degrees of freedom"))
+  
+#print(t_models_pp, preview = "docx")
+
+ t_models_pp 
+ 
+save_as_docx(t_models_pp,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t_models_pp.docx")
+
+
+
+```
+
+### Pairwise comparisons timing:condition
+
+Simple pairwise comparisons of significant main effects and interaction are collated in a table. 
+
+
+```{r t_contrasts_mod_pp}
+
+# PPT Q
+EMM.pptq <- emmeans(m.0.pptquad, ~ timing*condition)
+
+pairs.pptqt <- pairs(EMM.pptq , simple = "timing", adjust = "bonferroni") |> as_tibble()    
+pairs.pptqt.ci <- pairs(EMM.pptq , simple = "timing", adjust = "bonferroni") |>
+  confint() |>  as_tibble()
+pairs.pptqt <- full_join(pairs.pptqt,pairs.pptqt.ci )
+
+pairs.pptqc <- pairs(EMM.pptq, simple = "condition", adjust = "bonferroni") |> as_tibble()    # compare doses for each treat
+pairs.pptqc.ci <- pairs(EMM.pptq, simple = "condition", adjust = "bonferroni") |>
+  confint() |> 
+  as_tibble()  
+pairs.pptqc <- full_join(pairs.pptqc,pairs.pptqc.ci )
+
+
+pairs.pptq <- full_join(pairs.pptqt, pairs.pptqc)
+pairs.pptq$site <- rep("Quadriceps", nrow(pairs.pptq))
+pairs.pptq$test_mod <- rep("PPT", nrow(pairs.pptq))
+
+# CDT Q
+EMM.cdtq <- emmeans(m.0.cdtquad.noout, ~ timing*condition)
+
+pairs.cdtqt <- pairs(EMM.cdtq , simple = "timing", adjust = "bonferroni") |> as_tibble()    
+pairs.cdtqt.ci <- pairs(EMM.cdtq , simple = "timing", adjust = "bonferroni") |>
+  confint() |>  as_tibble()
+pairs.cdtqt <- full_join(pairs.cdtqt,pairs.cdtqt.ci )
+
+pairs.cdtqc <- pairs(EMM.cdtq, simple = "condition", adjust = "bonferroni") |> as_tibble()    # compare doses for each treat
+pairs.cdtqc.ci <- pairs(EMM.cdtq, simple = "condition", adjust = "bonferroni") |>
+  confint() |> 
+  as_tibble()  
+pairs.cdtqc <- full_join(pairs.cdtqc,pairs.cdtqc.ci )
+
+
+pairs.cdtq <- full_join(pairs.cdtqt, pairs.cdtqc)
+pairs.cdtq$site <- rep("Quadriceps", nrow(pairs.cdtq))
+pairs.cdtq$test_mod <- rep("CDT", nrow(pairs.cdtq))
+
+
+df_cont_mpp <- rbind(pairs.pptq,pairs.cdtq) 
+
+
+ts_mpp_contrasts <- df_cont_mpp |> 
+    rowwise() |> 
+  mutate(d = as_tibble(t_to_d(t.ratio, df, paired = T)[1]) |> pull(),
+         interpretation = as_tibble(interpret_cohens_d(t_to_d(t.ratio, df, paired = T)))[5] |> pull()) |> 
+  select(test_mod, site, timing, condition,contrast, estimate, lower.CL, upper.CL, everything()) |> 
+  rowwise() |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  flextable() |> 
+  set_header_labels(test_mod = "Test modalities", site = "Site", timing = "Timing", condition = "Condition", contrast = "Contrast", estimate = "Difference", lower.CL = "low", upper.CL = "high", SE = "SE", df = "Df", t.ratio = "t value", p.value = "p", d = "d~z~", interpretation = "Interpretation") |> 
+  add_header_row(values = c( "Test modalities", "Site","Main effects","Contrast","Difference","CI", "SE", "Df", "t value",  "p", "Effect size" ), colwidths = c(1,1,2,1,1,2,1,1,1,1,2)
+                 ) |> 
+  colformat_double(digits = 3) |> 
+  colformat_md(part = "header", j = 13) |> 
+  merge_v(part = "header") |> 
+  merge_v(j = c(1,2)) |> 
+  valign(part = "body", valign = "top") |> 
+  hline(i = 4, border = dash_border)  |> 
+    bold(part = "header")  |> 
+  bg(i = ~p.value < 0.05, j = 12, bg = "yellow") |> 
+    autofit() |> 
+  add_footer_lines(values = c("Data from 38 participants. \n Units: PPT, log; CDT, log \n Abreviations: PPT, Pressure pain threshold; CDT, Cold detection threshold; SE, Standard error; CI 95%, 95% confidence interval; Df, Degrees of freedom; dz, Cohen's d for paired samples. "))
+
+#print(ts_mpp_contrasts, preview = "docx")
+ts_mpp_contrasts
+
+save_as_docx(ts_mpp_contrasts,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/ts_mpp_contrasts.docx")
+
+```
+
+
+### Plots models timing:condition
+
+
+
+```{r plots_mpp,  fig.width = 10.5, fig.height=10}
+
+# PPT Q
+d.sum.pptq <- dm.ppt.quad |> 
+    group_by(timing, condition, ID) |> 
+    mutate(tm = mean(test_value, na.rm = T)) |> 
+    slice(1) |> 
+    ungroup() |> 
+    group_by(timing, condition) |> 
+    summarise(m = mean(tm, na.rm = T),
+              cil = ci_low(tm),
+              cih = ci_high(tm))
+
+ppptq <- plot_prepost_an(dm.ppt.quad, t = "Pressure pain threshold", u = "Log", df_an = an_mpp, v = "PPT_Quadriceps", y = "test_value", x = F) + showSignificance( c(1.05,2.1), max(d.sum.pptq$cih) +0.001*max(d.sum.pptq$cih) + 0.01, "*", width = -0.005, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( c(0.9,1.95), 2.75, "*", width = 0.005, segmentParams = list(col = "#00468BFF"), textParams = list(col = "#00468BFF")) +
+  showSignificance( 2.3, c(min(d.sum.pptq$m) -0.01*min(d.sum.pptq$m),max(d.sum.pptq$m) + 0.001*max(d.sum.pptq$m)) , "*", width = -0.05)  
+
+
+                                                                                                                                         
+#CDT Q
+
+
+pcdtq <- plot_prepost_an(dm.cdt.quad.noout, "Cold detection threshold", "Log", df_an = an_mpp, v = "CDT_Quadriceps", x = F) + showSignificance( c(1.05,2.1), 0.37, "*", width = -0.005, segmentParams = list(col = "#ED0000FF"), textParams = list(col = "#ED0000FF")) +
+  showSignificance( 2.3, c(0.25, 0.3) , "*", width = -0.05)  
+
+
+
+
+# ADT
+padt <- (plot_prepost_an(dm.adt, "Auditory detection threshold", "mA", df_an = an_mpp, v = "ADT_No site")) 
+
+p_mpp <- ppptq/pcdtq/padt + 
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = 'A') &
+  theme(legend.position = "bottom",
+        plot.tag = element_text(family = 'Roboto', size = 11, face = "bold"))
+
+
+ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/fig5_mpp.png", plot = p_mpp, dpi = 600, height = 10, width = 10)
+
+p_mpp
+
+
+
+
+
+```
+
+
+
+## Tables samples & models results
+
+Results from models are summarized, along with summary statistics in a table. Data are shown using natural units. Two other tables are made to display results of log transformed CDT and PPT and of standardized values for each test_modality:site.
+
+### Original units
+
+```{r t_summary_natural}
+
+dt_mods <- data_long |> 
+  select(ID, order, timing, condition, site, test_mod, test_value) |> 
+  group_by(ID, order, site, test_mod) |> 
+  pivot_wider(names_from = c(timing, condition), values_from = test_value) |>
+  rowwise() |> 
+  mutate(baseline = pre_exp - pre_cont,
+         abc_exp = post_exp - pre_exp,
+         abc_cont = post_cont - pre_cont,
+         eih = (post_exp - pre_exp) - (post_cont - pre_cont))  |> 
+  group_by(ID, site, test_mod) |> 
+  pivot_longer(
+    cols = c(pre_exp, post_exp, abc_exp, pre_cont, post_cont, abc_cont,  baseline, eih),
+    names_to = "cond", 
+    values_to = "values"
+    ) |> 
+  group_by(ID, test_mod, site, cond) |> 
+  summarise(ind_m = mean(values)) |> 
+  group_by(test_mod, site, cond) |> 
+  summarise(m = specify_decimal(mean(ind_m, na.rm = T),   2), 
+            sd = specify_decimal(sd(ind_m, na.rm = T),  2)) |> 
+  mutate(msd = glue("{m} ± {sd}")) |> 
+  select(-m, -sd) |> 
+  pivot_wider(names_from = cond, values_from = msd) |> 
+  mutate(site = if_else(test_mod == "adt", "no site", site)) |> 
+  mutate(test_mod = toupper(test_mod), 
+         test_mod = factor(test_mod, levels = c("PPT", "PP", "HPT", "CDT", "ADT"))) |> 
+  mutate(site = factor(site, levels = c("forearm", "quad", "no site"), labels =c("Forearm", "Quadriceps", "No site"))) |> arrange(site, test_mod)  
+
+p_int_mcs <- an_mcs |> 
+  mutate(test_mod = factor(test_mod, levels = levels(dt_mods$test_mod))) |> 
+  arrange(test_mod) |>
+  filter(term == "condition:site") |> 
+  mutate(across(c(DenDF, statistic), round, 2)) |> 
+  mutate(stat = glue("{statistic}~{NumDF},{DenDF}~")) |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  select(test_mod, stat, p.value)
+
+
+p_int_mpp <- an_mpp |> 
+  mutate(test_mod = factor(test_mod, levels = levels(dt_mods$test_mod))) |> 
+  arrange(test_mod) |> 
+  filter(term == "timing:condition") |> 
+  mutate(across(c(DenDF, statistic), round, 2)) |> 
+  mutate(stat = glue("^#^{statistic}~{NumDF},{DenDF}~")) |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  mutate(p.value = glue("^#^{p.value}")) |> 
+    filter(test_mod == "ADT") |> 
+  mutate(test_mod = factor(test_mod), site = factor(site)) |> 
+  select(test_mod,site, stat, p.value) 
+
+p_int_mfull <- df_an |> 
+  filter(effects == "test_mod:site") |> 
+  rename(statistic = "F value") |> 
+  rename(p.value = "Pr(>F)") |> 
+  mutate(across(c(DenDF, statistic), round, 2)) |> 
+  mutate(stat = glue("{statistic}~{NumDF},{DenDF}~")) |> 
+  mutate(p.value = pvalue_format_table(p.value))
+
+
+
+dt_mods <- full_join(dt_mods, p_int_mcs) |> 
+  rename(fpp = stat) |> 
+  rename(ppp = p.value)
+
+
+
+dt_mods <- full_join(dt_mods, p_int_mpp) |> 
+  mutate(
+    fpp = if_else(test_mod == "ADT",stat, fpp ),
+    ppp = if_else(test_mod == "ADT",p.value, ppp )
+         ) |>
+  select(-stat, -p.value)
+
+dt_mods$ffull <- c(rep(p_int_mfull$stat, 8), NA)
+dt_mods$pfull <- c(rep(p_int_mfull$p.value, 8), NA)
+
+t3 <- dt_mods |> 
+  select(test_mod,site, pre_cont, post_cont, abc_cont, pre_exp, post_exp, abc_exp, fpp, ppp,  baseline, eih, ffull, pfull) |> 
+  arrange(test_mod) |> 
+  flextable() |> 
+  set_header_labels(
+     test_mod = "Test modalities",site = "Site", pre_cont = "Pre", post_cont = "Post" , abc_cont = "Diff~post-pre~", pre_exp = "Pre", post_exp = "Post" , abc_exp = "Diff~post-pre~", fpp = "F~df1,df2~", ppp = "p", baseline = "Baseline~diff~", eih = "EIH", ffull = "F~df1,df2~", pfull = "p"
+  ) |> 
+  add_header_row(values = c(
+     "Test modalities","Site", "Control", "Exercise", "Site x Condition interaction", "Baseline~diff~", "EIH", "Test modalities x Site interaction"
+  ), colwidths = c(1,1,3,3,2,1,1,2)) |> 
+  colformat_md(part = "all", j = 1:14) |> 
+  merge_v(part = "header") |> 
+  bold(part = "header") |> 
+  align(part = "header", align = "center") |> 
+  merge_v(j = c(1,2, 9,10,13,14), part = "body") |> 
+  valign(j = c(1,2, 9,10,13,14), valign = "top") |> 
+  hline(i = c(2,4,6), part = "body", border = dash_border) |> 
+  hline(i = 8, part = "body") |> 
+  vline(j = c(2,  10), border = dash_border, part = "body") |> 
+  autofit() |> 
+  set_table_properties(layout = "autofit") |> 
+  add_footer_lines(values = c(
+"Data from 38 participants.\n # F statistics and p value reported from timing x condition interaction. Units: CDT, |°C|; HPT, °C; PP, VAS 100 - 0; PPT, kPa.\n Abbreviations: CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Mechanical pinprick rating; PPT, Pressure pain threshold; Diff post - pre, Difference of post and pre values in each condition.") )
+
+
+t3
+  
+#print(t2, preview = "docx")
+
+save_as_docx(t3,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t2.docx")
+```
+
+### Log transformed CDT and PPT
+
+PPT and CDT values were log transformed, values are reported in the table below.
+
+```{r t_summary_log}
+
+t_log <- data_long |> 
+  select(ID, order, timing, condition, site, test_mod, test_value) |> 
+  ungroup() |> 
+  rowwise() |> 
+    mutate(test_value = if_else(test_mod %in% c("ppt", "cdt"), logt(test_value), test_value)) |> 
+  group_by(ID, order, site, test_mod) |> 
+  pivot_wider(names_from = c(timing, condition), values_from = test_value) |>
+  rowwise() |> 
+  mutate(baseline = pre_exp - pre_cont,
+         abc_exp = post_exp - pre_exp,
+         abc_cont = post_cont - pre_cont,
+         eih = (post_exp - pre_exp) - (post_cont - pre_cont))  |> 
+  group_by(ID, site, test_mod) |> 
+  pivot_longer(
+    cols = c(pre_exp, post_exp, abc_exp, pre_cont, post_cont, abc_cont,  baseline, eih),
+    names_to = "cond", 
+    values_to = "values"
+    ) |> 
+  group_by(ID, test_mod, site, cond) |> 
+  summarise(ind_m = mean(values)) |> 
+  group_by(test_mod, site, cond) |> 
+  summarise(m = specify_decimal(mean(ind_m, na.rm = T),   2), 
+            sd = specify_decimal(sd(ind_m, na.rm = T),  2)) |> 
+  mutate(msd = glue("{m} ± {sd}")) |> 
+  select(-m, -sd) |> 
+  pivot_wider(names_from = cond, values_from = msd) |> 
+  mutate(site = if_else(test_mod == "adt", "no site", site)) |> 
+  mutate(test_mod = toupper(test_mod), 
+         test_mod = factor(test_mod, levels = c("PPT", "PP", "HPT", "CDT", "ADT"))) |> 
+  mutate(site = factor(site, levels = c("forearm", "quad", "no site"), labels =c("Forearm", "Quadriceps", "No site"))) |> arrange(site, test_mod) |> 
+  filter(test_mod %in% c("CDT", "PPT")) |> 
+  select(test_mod,site, pre_cont, post_cont,  pre_exp, post_exp) |> 
+  arrange(test_mod) |> 
+  flextable() |> 
+  set_header_labels(
+     test_mod = "Test modalities",site = "Site", pre_cont = "Pre", post_cont = "Post" , pre_exp = "Pre", post_exp = "Post"  ) |> 
+  add_header_row(values = c(
+     "Test modalities","Site", "Control", "Exercise"
+  ), colwidths = c(1,1,2,2)) |> 
+  colformat_md(part = "all", j = 1:6) |> 
+  merge_v(part = "header") |> 
+  bold(part = "header") |> 
+  align(part = "header", align = "center") |> 
+  merge_v(j = c(1,2), part = "body") |> 
+  valign(j = c(1,2), valign = "top") |> 
+  hline(i = c(2), part = "body", border = dash_border) |> 
+  vline(j = c(2), border = dash_border, part = "body") |> 
+  autofit() |> 
+  set_table_properties(layout = "autofit") |> 
+  add_footer_lines(values = c(
+"Data from 38 participants.\n Units: Log.\n Abbreviations: PPT, Pressure pain threshold; CDT, Cold detection threshold.") )
+
+
+
+t_log
+
+save_as_docx(t_log,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t2_log.docx")
+  
+#print(t2_log, preview = "docx")
+
+
+```
+
+### Standardized units
+
+Models on EIH and absolute change used standardized values to take into account test modalities and site variability differences. PPT and CDT were log transformed prior to this procedure.
+
+Values were standardized in each category of test modality and site using the following formula:
+
+$$x_{standardized} = \frac{x_{obs} - \overline{x}}{SD}$$
+Leading each site:test modality level to have $\overline{x} = 0$ and  $SD = 1$ as can be seen with the code below:
+
+```{r std_values}
+std_dat <- data_long |> 
+  select(ID, order, timing, condition, site, test_mod, test_value) |> 
+  ungroup() |> 
+  rowwise() |> 
+    mutate(test_value = if_else(test_mod %in% c("ppt", "cdt"), logt(test_value), test_value)) |> 
+  group_by(test_mod, site) |> 
+  mutate(test_value = scale(test_value)) # scale function standardized
+
+std_dat |> 
+  group_by(test_mod, site) |> 
+  summarise(
+    m = mean(test_value, na.rm = T),
+    sd = sd(test_value, na.rm = T)
+  )
+```
+
+A third table of summary statistics is  computed the pre, post, absolute change values in each condition and timing levels after standardization. 
+
+```{r t_summary_standardized}
+
+  dt_mods_std <- std_dat |> 
+  group_by(test_mod, timing, condition, site) |> 
+  ungroup() |> 
+  group_by(ID, order, site, test_mod) |> 
+  pivot_wider(names_from = c(timing, condition), values_from = test_value) |>
+  rowwise() |> 
+  mutate(baseline = pre_exp - pre_cont,
+         abc_exp = post_exp - pre_exp,
+         abc_cont = post_cont - pre_cont,
+         eih = (post_exp - pre_exp) - (post_cont - pre_cont))  |> 
+  group_by(ID, site, test_mod) |> 
+  pivot_longer(
+    cols = c(pre_exp, post_exp, abc_exp, pre_cont, post_cont, abc_cont,  baseline, eih),
+    names_to = "cond", 
+    values_to = "values"
+    ) |> 
+  group_by(ID, test_mod, site, cond) |> 
+  summarise(ind_m = mean(values)) |> 
+  group_by(test_mod, site, cond) |> 
+  summarise(m = specify_decimal(mean(ind_m, na.rm = T),   2), 
+            sd = specify_decimal(sd(ind_m, na.rm = T),  2)) |> 
+  mutate(msd = glue("{m} ± {sd}")) |> 
+  select(-m, -sd) |> 
+  pivot_wider(names_from = cond, values_from = msd) |> 
+  mutate(site = if_else(test_mod == "adt", "no site", site)) |> 
+  mutate(test_mod = toupper(test_mod), 
+         test_mod = factor(test_mod, levels = c("PPT", "PP", "HPT", "CDT", "ADT"))) |> 
+  mutate(site = factor(site, levels = c("forearm", "quad", "no site"), labels =c("Forearm", "Quadriceps", "No site"))) |> arrange(site, test_mod)  
+
+p_int_mcs <- an_mcs |> 
+  mutate(test_mod = factor(test_mod, levels = levels(dt_mods$test_mod))) |> 
+  arrange(test_mod) |>
+  filter(term == "condition:site") |> 
+  mutate(across(c(DenDF, statistic), round, 2)) |> 
+  mutate(stat = glue("{statistic}~{NumDF},{DenDF}~")) |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  select(test_mod, stat, p.value)
+
+
+p_int_mpp <- an_mpp |> 
+  mutate(test_mod = factor(test_mod, levels = levels(dt_mods$test_mod))) |> 
+  arrange(test_mod) |> 
+  filter(term == "timing:condition") |> 
+  mutate(across(c(DenDF, statistic), round, 2)) |> 
+  mutate(stat = glue("^#^{statistic}~{NumDF},{DenDF}~")) |> 
+  mutate(p.value = pvalue_format_table(p.value)) |> 
+  mutate(p.value = glue("^#^{p.value}")) |> 
+    filter(test_mod == "ADT") |> 
+  mutate(test_mod = factor(test_mod), site = factor(site)) |> 
+  select(test_mod,site, stat, p.value) 
+
+p_int_mfull <- df_an |> 
+  filter(effects == "test_mod:site") |> 
+  rename(statistic = "F value") |> 
+  rename(p.value = "Pr(>F)") |> 
+  mutate(across(c(DenDF, statistic), round, 2)) |> 
+  mutate(stat = glue("{statistic}~{NumDF},{DenDF}~")) |> 
+  mutate(p.value = pvalue_format_table(p.value))
+
+
+
+dt_mods_std  <- full_join(dt_mods_std  , p_int_mcs) |> 
+  rename(fpp = stat) |> 
+  rename(ppp = p.value)
+
+
+
+dt_mods_std   <- full_join(dt_mods_std  , p_int_mpp) |> 
+  mutate(
+    fpp = if_else(test_mod == "ADT",stat, fpp ),
+    ppp = if_else(test_mod == "ADT",p.value, ppp )
+         ) |>
+  select(-stat, -p.value)
+
+dt_mods_std$ffull <- c(rep(p_int_mfull$stat, 8), NA)
+dt_mods_std$pfull <- c(rep(p_int_mfull$p.value, 8), NA)
+
+t3_std <- dt_mods_std  |> 
+  select(test_mod,site, pre_cont, post_cont, abc_cont, pre_exp, post_exp, abc_exp, fpp, ppp,  baseline, eih, ffull, pfull) |> 
+  arrange(test_mod) |> 
+  flextable() |> 
+  set_header_labels(
+     test_mod = "Test modalities",site = "Site", pre_cont = "Pre", post_cont = "Post" , abc_cont = "Diff~post-pre~", pre_exp = "Pre", post_exp = "Post" , abc_exp = "Diff~post-pre~", fpp = "F~df1,df2~", ppp = "p", baseline = "Baseline~diff~", eih = "EIH", ffull = "F~df1,df2~", pfull = "p"
+  ) |> 
+  add_header_row(values = c(
+     "Test modalities","Site", "Control", "Exercise", "Site x Condition interaction", "Baseline~diff~", "EIH", "Test modalities x Site interaction"
+  ), colwidths = c(1,1,3,3,2,1,1,2)) |> 
+  colformat_md(part = "all", j = 1:14) |> 
+  merge_v(part = "header") |> 
+  bold(part = "header") |> 
+  align(part = "header", align = "center") |> 
+  merge_v(j = c(1,2, 9,10,13,14), part = "body") |> 
+  valign(j = c(1,2, 9,10,13,14), valign = "top") |> 
+  hline(i = c(2,4,6), part = "body", border = dash_border) |> 
+  hline(i = 8, part = "body") |> 
+  vline(j = c(2,  10), border = dash_border, part = "body") |> 
+  autofit() |> 
+  set_table_properties(layout = "autofit") |> 
+  add_footer_lines(values = c(
+"Data from 38 participants.\n # F statistics and p value reported from timing x condition interaction. \n Units: standardized; PPT and CDT were log transformed before standardization.\n Abbreviations: CDT, Cold detection threshold; HPT, Heat pain threshold; PP, Mechanical pinprick rating; PPT, Pressure pain threshold; Diff post - pre, Difference of post and pre values in each condition.") )
+
+
+
+
+
+t3_std 
+
+save_as_docx(t3_std,  path = "/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/tables_wp1/t2_std.docx")
+  
+
+
+
+```
+
+
+# Variables involved in EIH
+
+An exploratory analysis is conducted to observe potential EIH contributors. As EIH was only observed at the quadriceps using PPT we consider the mean individual EIH (of three values) and relate it, using spearman rho correlation coefficient and scatterplots, to questionnaires scores, relative peak power output, rating of perceived exertion, changes in blood pressure, and individual data. To preserve statistical power for a purely exploratory analysis, no p value correction was applied. 
+
+
+```{r data_corr }
+# selecting data of personal characteristics
+d_char <- data |> 
+  select(ID, W_peak_rel, STAI_2, PCS, FPQ, IPAQ_total_moderate, IPAQ_total_vigourous, IPAQ_total_pa, TSK, bmi) |> 
+  group_by(ID) |> 
+  slice(1) |> 
+  ungroup() |> 
+  mutate(across(-ID, scale)) # scaling personal characteristics data
+
+# selecting not controlled cardiovascular data and computing delta
+d_cv <- d_cov_long |> 
+  select(ID,condition, timing, br, sbp, dbp) |> 
+  pivot_wider(names_from = c(condition, timing), values_from = c(br, sbp, dbp)) |> 
+  mutate(
+    delta_br = (br_exp_post - br_exp_pre) - (br_cont_post - br_cont_pre),
+    delta_bp_diast = (dbp_exp_post - dbp_exp_pre) - (dbp_cont_post - dbp_cont_pre),
+    delta_bp_sys = (sbp_exp_post - sbp_exp_pre) - (sbp_cont_post - sbp_cont_pre),
+  ) |> 
+  select(ID, delta_br, delta_bp_diast, delta_bp_sys) |> 
+  ungroup() |> 
+  mutate(across(-ID, scale)) # scaling cardiovascular data
+
+# select rpe and stai1
+d_session <- data |> 
+  select(ID, condition, RPE) |> 
+  mutate(RPE = as.numeric(RPE)) |> 
+  pivot_wider(names_from = condition, values_from = RPE) |> 
+  mutate(delta_rpe = exp - cont) |> 
+  select(ID, delta_rpe) |> 
+   ungroup() |> 
+  mutate(across(-ID, scale))# scaling rpe data
+  
+# a function is created to filter eih by site and test modality
+# this data set is then merged with data sets from other variables
+d_corr <- function(tm, s) {
+
+  d <- dm |>
+    filter(test_mod == tm, site == s) |>
+    group_by(ID) |>
+    summarise(
+      eih = mean(eih),
+      baseline = mean(test_value_pre),
+      delta_temp = mean(delta_temp)
+    ) |>
+    select(ID, eih, baseline, delta_temp) 
+
+  d1 <- full_join(d, d_char) 
+  d2 <- full_join(d1, d_cv)
+  d_corr <- full_join(d2, d_session) |>
+    pivot_longer(cols = c(-eih, -ID), values_to = "val", names_to = "var2")
+  return(d_corr)
+}
+
+
+
+
+
+var_new_names_eih <- c( "W_peak_rel" = "Relative PPO"  , "PCS" = "PCS total" , "FPQ" = "FPQ" , "IPAQ_total_moderate"= "IPAQ total mPA" , "IPAQ_total_vigourous" = "IPAQ total vPA" , "IPAQ_total_pa"= "IPAQ total PA", "W_peak" = "PPO", "TSK" = "TSK", "STAI_1" = "STAI-Y1", "bmi" = "BMI", "m_pre_quad_ppt" = "Baseline PPT", "m_pre_quad_cdt" = "Pre quad CDT", "m_pre_quad_hpt" = "Pre quad HPT", "m_pre_quad_pp" = "Pre quad PP", "m_pre_forearm_ppt" = "Pre forearm PPT", "m_pre_forearm_cdt" = "Pre forearm CDT", "m_pre_forearm_hpt" = "Pre forearm HPT", "m_pre_forearm_pp" = "Pre forearm PP","delta_rpe" =  "Change RPE" ,  "delta_bp_sys" = "Change SBP", "delta_bp_diast" = "Change DBP" ,   "delta_temp" = "Change Tsk dominant quadriceps", "STAI_2" = "STAI Y2")
+
+
+
+
+```
+
+
+```{r corr_eih_ppt_q, fig.dim=c(10,10)}
+
+
+
+cor.eihpptq <- d_corr("PPT", "Quadriceps") |>
+  pivot_wider(names_from = var2, values_from = val) |>
+  cor_test(
+    vars = "eih",
+    vars2 = c( "baseline","bmi","PCS", "FPQ", "TSK", "IPAQ_total_pa", "IPAQ_total_moderate", "IPAQ_total_vigourous", "W_peak_rel", "delta_bp_sys", "delta_bp_diast","delta_br", "delta_rpe", "delta_temp", "STAI_2"),
+    method = "spearman"
+  ) 
+
+
+plot.corr.eihpptq <- full_join( d_corr("PPT", "Quadriceps"), cor.eihpptq) |>
+  filter(!var2 %in% c("bmi", "baseline", "delta_br")) |> 
+   mutate(var2 = str_replace_all(var2, var_new_names_eih))  |> 
+  filter(var2 != "Change Tsk dominant quadriceps") |> 
+  mutate(var2 = factor(var2, 
+                       levels = c(
+                         "Change SBP", "Change DBP", "Change RPE", "IPAQ total mPA", "IPAQ total vPA", "IPAQ total PA","Relative PPO", "FPQ", "PCS total", "STAI Y2", "TSK"
+                       ))) |> 
+  ungroup() |> 
+  rowwise() |> 
+   mutate(
+    signif = pvalue_format_plot(p),
+         signif = factor(signif),
+           cor = round(cor, 2),
+         p = pvalue_format_plot(p),
+         corr = glue("rho = {cor}, {p}")) |> 
+   ggplot(aes(y = eih, x = val)) +
+  geom_point(alpha = 0.7) +
+  geom_smooth(se = F, method = "lm", col = "#ADB6B6FF") +
+  geom_text(aes(label = corr, y = Inf, x = -Inf ), hjust = -0.1, vjust = +1.2, family = "Roboto", col = "black") +
+  labs(col = "P correlation", y = "Standardized EIH (PPT quadriceps)", x = "Standardized units") +
+  #scale_y_continuous(limits = c(-2,3)) +
+  facet_wrap(~var2, scales = "free") + 
+  my_theme()
+
+
+
+ggsave("/Users/vladimiraron/Library/CloudStorage/OneDrive-UCL/PhD/Projects/WP1/writing/figures_wp1/fig6_corr.png", plot = plot.corr.eihpptq, dpi = 1200, height = 8, width = 9)
+
+plot.corr.eihpptq
+```
+
