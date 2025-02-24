@@ -1,7 +1,7 @@
 # EIH_TestMod_Site
 
 
-Data and Code for the manuscript: "Exercise-induced hypoalgesia: effect of test modality and testing site in healthy young males"
+Data and Code for the manuscript: "A single bout of aerobic exercise reduces pain induced by blunt pressure but not by cutaneous mechanical or thermal stimulation, solely at exercising body parts: a sensory characterization of exercise-induced hypoalgesia"
 
 DATA
 
