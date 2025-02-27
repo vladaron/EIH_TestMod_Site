@@ -1,26 +1,26 @@
-function varargout = VIBRO_interface(varargin)
-% VIBRO_INTERFACE MATLAB code for VIBRO_interface.fig
-%      VIBRO_INTERFACE, by itself, creates a new VIBRO_INTERFACE or raises the existing
+function varargout = AUDITORY_interface(varargin)
+% AUDITORY_INTERFACE MATLAB code for AUDITORY_interface.fig
+%      AUDITORY_INTERFACE, by itself, creates a new AUDITORY_INTERFACE or raises the existing
 %      singleton*.
 %
-%      H = VIBRO_INTERFACE returns the handle to a new VIBRO_INTERFACE or the handle to
+%      H = AUDITORY_INTERFACE returns the handle to a new AUDITORY_INTERFACE or the handle to
 %      the existing singleton*.
 %
-%      VIBRO_INTERFACE('CALLBACK',hObject,eventData,handles,...) calls the local
-%      function named CALLBACK in VIBRO_INTERFACE.M with the given input arguments.
+%      AUDITORY_INTERFACE('CALLBACK',hObject,eventData,handles,...) calls the local
+%      function named CALLBACK in AUDITORY_INTERFACE.M with the given input arguments.
 %
-%      VIBRO_INTERFACE('Property','Value',...) creates a new VIBRO_INTERFACE or raises the
+%      AUDITORY_INTERFACE('Property','Value',...) creates a new AUDITORY_INTERFACE or raises the
 %      existing singleton*.  Starting from the left, property value pairs are
-%      applied to the GUI before VIBRO_interface_OpeningFcn gets called.  An
+%      applied to the GUI before AUDITORY_interface_OpeningFcn gets called.  An
 %      unrecognized property name or invalid value makes property application
-%      stop.  All inputs are passed to VIBRO_interface_OpeningFcn via varargin.
+%      stop.  All inputs are passed to AUDITORY_interface_OpeningFcn via varargin.
 %
 %      *See GUI Options on GUIDE's Tools menu.  Choose "GUI allows only one
 %      instance to run (singleton)".
 %
 % See also: GUIDE, GUIDATA, GUIHANDLES
 
-% Edit the above text to modify the response to help VIBRO_interface
+% Edit the above text to modify the response to help AUDITORY_interface
 
 % Last Modified by GUIDE v2.5 25-Nov-2022 14:22:00
 
@@ -28,8 +28,8 @@ function varargout = VIBRO_interface(varargin)
 gui_Singleton = 1;
 gui_State = struct('gui_Name',       mfilename, ...
                    'gui_Singleton',  gui_Singleton, ...
-                   'gui_OpeningFcn', @VIBRO_interface_OpeningFcn, ...
-                   'gui_OutputFcn',  @VIBRO_interface_OutputFcn, ...
+                   'gui_OpeningFcn', @AUDITORY_interface_OpeningFcn, ...
+                   'gui_OutputFcn',  @AUDITORY_interface_OutputFcn, ...
                    'gui_LayoutFcn',  [] , ...
                    'gui_Callback',   []);
 if nargin && ischar(varargin{1})
@@ -44,26 +44,26 @@ end
 % End initialization code - DO NOT EDIT
 
 
-% --- Executes just before VIBRO_interface is made visible.
-function VIBRO_interface_OpeningFcn(hObject, eventdata, handles, varargin)
+% --- Executes just before AUDITORY_interface is made visible.
+function AUDITORY_interface_OpeningFcn(hObject, eventdata, handles, varargin)
 % This function has no output args, see OutputFcn.
 % hObject    handle to figure
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
-% varargin   command line arguments to VIBRO_interface (see VARARGIN)
+% varargin   command line arguments to AUDITORY_interface (see VARARGIN)
 
-% Choose default command line output for VIBRO_interface
+% Choose default command line output for AUDITORY_interface
 handles.output = hObject;
 
 % Update handles structure
 guidata(hObject, handles);
 
-% UIWAIT makes VIBRO_interface wait for user response (see UIRESUME)
+% UIWAIT makes AUDITORY_interface wait for user response (see UIRESUME)
 % uiwait(handles.figure1);
 
 
 % --- Outputs from this function are returned to the command line.
-function varargout = VIBRO_interface_OutputFcn(hObject, eventdata, handles) 
+function varargout = AUDITORY_interface_OutputFcn(hObject, eventdata, handles) 
 % varargout  cell array for returning output args (see VARARGOUT);
 % hObject    handle to figure
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -145,7 +145,7 @@ end
 
 
 
-function intensity_rate_edit_Callback(hObject, eventdata, handles)
+
 % hObject    handle to intensity_rate_edit (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
