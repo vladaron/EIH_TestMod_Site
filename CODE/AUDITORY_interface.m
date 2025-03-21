@@ -309,7 +309,7 @@ set(handles.init_btn,'UserData',data);
 
 site_str=get(handles.site_popup,'String');
 site_str=site_str{get(handles.site_popup,'Value')};
-filename=[data.output_folder filesep 'ALGO ' site_str ' ' datestr(now,'yymmdd_HH_MM_SS')];
+filename=[data.output_folder filesep 'AUDIO ' site_str ' ' datestr(now,'yymmdd_HH_MM_SS')];
 save(filename,'data');
 
 
