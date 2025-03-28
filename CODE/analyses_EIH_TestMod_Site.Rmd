@@ -3292,7 +3292,7 @@ pcdtq <- plot_prepost_an(dm.cdt.quad.noout, "Cold detection threshold", "Log", d
 
 
 # ADT
-padt <- (plot_prepost_an(dm.adt, "Auditory detection threshold", "Arbitrary units [0,1]", df_an = an_mpp, v = "ADT_No site"))
+padt <- (plot_prepost_an(dm.adt, "Auditory detection threshold", "/1", df_an = an_mpp, v = "ADT_No site"))
 
 p_mpp <- ppptq/pcdtq/padt + 
   plot_layout(guides = "collect") +
