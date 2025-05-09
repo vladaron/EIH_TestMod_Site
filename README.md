@@ -1,7 +1,7 @@
 # EIH_TestMod_Site
 
 
-Code for the manuscript: "A single bout of aerobic exercise reduces pain induced by blunt pressure but not by cutaneous mechanical or thermal stimulation, solely at exercising body parts: a sensory characterization of exercise-induced hypoalgesia"
+Code for the manuscript: "Aerobic exercise reduces pain induced by blunt pressure at exercising body parts: a sensory characterization of exercise-induced hypoalgesia."
 
 CODE
 
