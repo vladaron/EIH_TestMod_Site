@@ -1,7 +1,7 @@
 # EIH_TestMod_Site
 
 
-Code for the manuscript: "Aerobic exercise reduces pain induced by blunt pressure at exercising body parts: a sensory characterization of exercise-induced hypoalgesia."
+Code for the manuscript: "Exercise-induced hypoalgesia is predominantly driven by a selective modulation of nociception from exercising muscles."
 
 CODE
 
