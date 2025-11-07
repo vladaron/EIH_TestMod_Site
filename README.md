@@ -1,7 +1,7 @@
 # EIH_TestMod_Site
 
 
-Code for the manuscript: "Exercise-induced hypoalgesia is predominantly driven by a selective modulation of nociception from exercising muscles."
+Code for the manuscript: "Exercise-induced hypoalgesia is best explained by a selective modulation of nociceptive signals originating from exercising muscles"
 
 CODE
 
